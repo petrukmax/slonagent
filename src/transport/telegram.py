@@ -298,21 +298,24 @@ class TelegramTransport(BaseTransport):
                 q["kind"] == "edit" and q["msg"].message_id == item["msg"].message_id
                 for q in self._queue._queue
             ):
-                item["future"].set_result(item["msg"])
                 continue
-            future = item["future"]
+            future = item.get("future")
             try:
-                future.set_result(await self._exec_item(item))
+                result = await self._exec_item(item)
+                if future: future.set_result(result)
             except (TelegramRetryAfter, TelegramServerError) as e:
                 wait = e.retry_after if isinstance(e, TelegramRetryAfter) else 5
                 log.warning("Telegram error, waiting %s sec: %s", wait, e)
                 await asyncio.sleep(wait)
                 try:
-                    future.set_result(await self._exec_item(item))
+                    result = await self._exec_item(item)
+                    if future: future.set_result(result)
                 except Exception as e2:
-                    future.set_exception(e2)
+                    if future: future.set_exception(e2)
+                    else: log.warning("queue item failed after retry: %s", e2)
             except Exception as e:
-                future.set_exception(e)
+                if future: future.set_exception(e)
+                else: log.warning("queue item failed: %s", e)
             await asyncio.sleep(1.5)
 
 
@@ -326,11 +329,9 @@ class TelegramTransport(BaseTransport):
         self._queue.put_nowait({"kind": "send", "text": text, "kwargs": kwargs, "future": future})
         return await future
 
-    async def _edit(self, msg: Message, text: str, **kwargs) -> Message:
+    def _edit(self, msg: Message, text: str, **kwargs):
         self._ensure_queue()
-        future = asyncio.get_event_loop().create_future()
-        self._queue.put_nowait({"kind": "edit", "msg": msg, "text": text, "kwargs": kwargs, "future": future})
-        return await future
+        self._queue.put_nowait({"kind": "edit", "msg": msg, "text": text, "kwargs": kwargs})
     
     async def _answer(self, text: str, messages: list | None = None, expandable: bool = False, final: bool = False, prefix: str = "", max_chunks = None):
         if messages is None:
@@ -359,11 +360,7 @@ class TelegramTransport(BaseTransport):
 
         for m, body in enumerate(bodies):
             if m < len(messages):
-                try:
-                    messages[m] = await self._edit(messages[m], body, parse_mode="HTML")
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        raise
+                self._edit(messages[m], body, parse_mode="HTML")
             else:
                 messages.append(await self._send(body, parse_mode="HTML"))
         for msg in messages[len(bodies):]:
@@ -386,14 +383,11 @@ class TelegramTransport(BaseTransport):
         else:
             result_text = html.escape(result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=2))
         result_text = result_text[:2000]
-        try:
-            await self._edit(
-                self._tool_msg,
-                f"<blockquote expandable>{self._tool_call_text}</blockquote>\n<blockquote expandable>{result_text}</blockquote>",
-                parse_mode="HTML",
-            )
-        except Exception:
-            logging.debug("[transport] Не удалось обновить tool message", exc_info=True)
+        self._edit(
+            self._tool_msg,
+            f"<blockquote expandable>{self._tool_call_text}</blockquote>\n<blockquote expandable>{result_text}</blockquote>",
+            parse_mode="HTML",
+        )
 
     async def send_message(self, text: str, stream_id=None, final: bool = True):
         messages = self._stream_messages.setdefault(stream_id, []) if stream_id else None
