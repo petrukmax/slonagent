@@ -363,7 +363,6 @@ class Agent:
                 self._stream_counter += 1
                 stream_id = self._stream_counter
                 accumulated_calls: dict[int, dict] = {}
-                thinking_finalized = False
 
                 async for chunk in stream:
                     if self._stop_event.is_set():
@@ -371,11 +370,6 @@ class Agent:
                     if not chunk.choices:
                         continue
                     delta = chunk.choices[0].delta
-                    logging.debug("[stream] chunk: content=%r tc=%s finish=%s extra=%s",
-                                  delta.content[:80] if delta.content else None,
-                                  len(delta.tool_calls) if delta.tool_calls else 0,
-                                  chunk.choices[0].finish_reason,
-                                  list((getattr(delta, "model_extra", None) or {}).keys()) or None)
 
                     if delta.tool_calls:
                         for tc in delta.tool_calls:
@@ -411,9 +405,6 @@ class Agent:
                         else:
                             content = delta.content.removeprefix("</thought>")
                             if content:
-                                if thinking_text and not thinking_finalized:
-                                    await self.transport.send_thinking(thinking_text, thinking_id, final=True)
-                                    thinking_finalized = True
                                 text += content
                                 await self.transport.send_message(text, stream_id, final=False)
                     # OpenAI o1: reasoning_content, OpenRouter: reasoning
@@ -427,7 +418,7 @@ class Agent:
                     if unexpected:
                         logging.warning("[stream] unknown delta fields: %s", unexpected)
 
-                if thinking_text and not thinking_finalized:
+                if thinking_text:
                     await self.transport.send_thinking(thinking_text, thinking_id, final=True)
                 if text and stream_id:
                     await self.transport.send_message(text, stream_id, final=True)
