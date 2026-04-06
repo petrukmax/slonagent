@@ -291,6 +291,8 @@ class TelegramTransport(BaseTransport):
 
     async def _queue_worker(self):
         """Process send/edit queue with rate limiting."""
+
+        last_action = 0.0
         while True:
             item = await self._queue.get()
             # Skip stale edits — if queue has a newer edit for same message, skip this one
@@ -299,6 +301,10 @@ class TelegramTransport(BaseTransport):
                 for q in self._queue._queue
             ):
                 continue
+            
+            wait = (4.0 if item["kind"]=="edit" else 1.0) - max(0, asyncio.get_event_loop().time() - last_action)
+            if wait > 0: await asyncio.sleep(wait)
+
             future = item.get("future")
             try:
                 result = await self._exec_item(item)
@@ -316,8 +322,7 @@ class TelegramTransport(BaseTransport):
             except Exception as e:
                 if future: future.set_exception(e)
                 else: log.warning("queue item failed: %s", e)
-            await asyncio.sleep(1.5)
-
+            last_action = asyncio.get_event_loop().time()            
 
     def _ensure_queue(self):
         if not self._queue_task or self._queue_task.done():
