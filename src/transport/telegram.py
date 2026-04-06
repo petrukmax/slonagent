@@ -234,7 +234,13 @@ class TelegramTransport(BaseTransport):
             async def _typing_loop():
                 try:
                     while True:
-                        await self.bot.send_chat_action(chat_id=self.chat_id, action="typing", message_thread_id=self.thread_id)
+                        try:
+                            await self.bot.send_chat_action(chat_id=self.chat_id, action="typing", message_thread_id=self.thread_id)
+                        except TelegramRetryAfter as e:
+                            log.warning("typing flood, waiting %s sec", e.retry_after)
+                            await asyncio.sleep(e.retry_after)
+                        except Exception as e:
+                            log.warning("typing action failed: %s", e)
                         await asyncio.sleep(4)
                 except asyncio.CancelledError:
                     pass
@@ -307,7 +313,7 @@ class TelegramTransport(BaseTransport):
                     future.set_exception(e2)
             except Exception as e:
                 future.set_exception(e)
-            await asyncio.sleep(1)
+            await asyncio.sleep(1.5)
 
 
     def _ensure_queue(self):
