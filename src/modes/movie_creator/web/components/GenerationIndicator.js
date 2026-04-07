@@ -47,6 +47,7 @@ export class GenerationIndicator extends Component {
         const done = items.filter(g => g.status !== 'generating').length;
         const total = items.length;
         const active = total > 0;
+        const pending = done < total;
         const { open } = this.state;
 
         const dismiss = (e, id) => {
@@ -57,7 +58,7 @@ export class GenerationIndicator extends Component {
         };
 
         return html`
-            <span class=${'gen-indicator' + (active ? ' active' : '')} onClick=${active ? () => this.setState({ open: !open }) : null}>
+            <span class=${'gen-indicator' + (pending ? ' active' : active ? ' has-items' : '')} onClick=${active ? () => this.setState({ open: !open }) : null}>
                 ${active ? `${done}/${total}` : '0'} \u2699
                 ${open && active && html`
                     <div class="gen-dropdown">

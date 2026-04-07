@@ -16,9 +16,10 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tabs { display: flex; align-items: center; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .disconnected { display: flex; align-items: center; justify-content: center; height: 100vh; color: var(--text-dim); font-size: 16px; }
 .tabs .gen-indicator { font-size: 12px; color: var(--text-dim); padding: 6px 16px; position: relative; user-select: none; margin-left: auto; margin-right: 8px; }
+.tabs .gen-indicator.has-items { color: var(--green); cursor: pointer; }
 .tabs .gen-indicator.active { color: var(--warn); cursor: pointer; animation: gen-pulse 1.5s infinite; }
 @keyframes gen-pulse { 0%,100% { color: var(--text-dim); } 50% { color: var(--warn); } }
-.tabs .gen-indicator.active:hover { color: var(--text); }
+.tabs .gen-indicator.has-items:hover, .tabs .gen-indicator.active:hover { color: var(--text); }
 .gen-dropdown { position: absolute; right: 16px; top: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; min-width: 260px; z-index: 100; padding: 4px 0; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
 .gen-dropdown-item { padding: 6px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 8px; }
 .gen-dropdown-item:hover { background: var(--surface3); }
