@@ -255,7 +255,7 @@ class TelegramTransport(BaseTransport):
         return self._skill
 
     def set_agent(self, agent):
-        self.agent = agent
+        super().set_agent(agent)
 
         async def update_commands():
             all_commands = {
