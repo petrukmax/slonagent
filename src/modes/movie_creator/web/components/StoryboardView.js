@@ -1,12 +1,12 @@
 // Storyboard grid for a selected scene. Click a card to open ShotView.
-import { html, useState, useRef, useEffect } from '../lib.js';
+import { html, useRef, useEffect } from '../lib.js';
 import { app } from '../app.js';
+import { Lightbox } from '../common/Lightbox.js';
 
 export function StoryboardView() {
     const sp = app.state.selectedPath;
     const sceneId = sp?.[0] === 'scenes' ? sp[1] : null;
     const scene = sceneId ? (app.state.project.scenes[sceneId] || null) : null;
-    const [lightbox, setLightbox] = useState(null);
     if (!scene) {
         return html`<div class="center-empty">Select a scene to start storyboarding</div>`;
     }
@@ -40,28 +40,18 @@ export function StoryboardView() {
                     ? html`<div class="center-empty">No shots yet</div>`
                     : html`<div class="shot-grid">
                         ${shots.map((shot, i) => html`
-                            <${ShotCard} key=${shot.id} scene=${scene} shot=${shot} index=${i}
-                                onZoom=${src => setLightbox(src)} />
+                            <${ShotCard} key=${shot.id} scene=${scene} shot=${shot} index=${i} />
                         `)}
                     </div>`}
             </div>
-            ${lightbox ? html`
-                <div class="lightbox" onClick=${() => setLightbox(null)}>
-                    <img src=${lightbox} onClick=${e => e.stopPropagation()} />
-                </div>
-            ` : null}
         </div>
     `;
 }
 
-function ShotCard({ scene, shot, index, onZoom }) {
+function ShotCard({ scene, shot, index }) {
     const primary = shot.generations?.[shot.primary_generation_id];
     const thumb = primary?.file ? `/api/asset/${primary.file}` : null;
     const description = shot.description || '(empty)';
-
-    function zoom() {
-        if (thumb) onZoom(thumb);
-    }
 
     function edit(e) {
         e.stopPropagation();
@@ -75,9 +65,9 @@ function ShotCard({ scene, shot, index, onZoom }) {
     }
 
     return html`
-        <div class="shot-card" onClick=${zoom}>
+        <div class="shot-card" onClick=${e => thumb && Lightbox.open(e.currentTarget)}>
             <div class="shot-thumb">
-                ${thumb ? html`<img src=${thumb} />` : null}
+                ${thumb ? html`<img src=${thumb} data-lightbox="storyboard" />` : null}
             </div>
             <div class="shot-compact-footer">
                 <div class="shot-preview">${index + 1}. ${description}</div>

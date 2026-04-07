@@ -14,6 +14,7 @@ import { ShotForm } from './components/ShotForm.js';
 import { FolderList } from './components/FolderList.js';
 import { FolderForm } from './components/FolderForm.js';
 import './common/Dialog.js';
+import './common/Lightbox.js';
 import { Chat } from './components/Chat.js';
 import { GenerationIndicator } from './components/GenerationIndicator.js';
 

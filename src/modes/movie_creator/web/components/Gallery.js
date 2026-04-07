@@ -9,6 +9,7 @@
 
 import { html, useState } from '../lib.js';
 import { app } from '../app.js';
+import { Lightbox } from '../common/Lightbox.js';
 import { useEntity } from '../common/EntityView.js';
 import { Select, Textarea } from '../common/Form.js';
 import { FormView } from '../common/FormView.js';
@@ -33,7 +34,6 @@ export function Gallery({ kind, defaultPrompt }) {
     const ctx = useEntity();
     if (!ctx?.entity?.id) return null;
     const { entity, path } = ctx;
-    const [lightbox, setLightbox] = useState(null);
     const [dragover, setDragover] = useState(false);
     const gens = Object.values(entity.generations || {}).filter(g => g.kind === kind);
     const hasPrimary = 'primary_generation_id' in entity;
@@ -96,7 +96,6 @@ export function Gallery({ kind, defaultPrompt }) {
                                 gen=${g}
                                 isPrimary=${hasPrimary && g.id === primaryId}
                                 canSetPrimary=${hasPrimary}
-                                onZoom=${src => setLightbox(src)}
                                 onSetPrimary=${() => setPrimary(g)}
                                 onRemix=${() => remix(g)}
                                 onDelete=${() => deleteGen(g)}
@@ -104,16 +103,11 @@ export function Gallery({ kind, defaultPrompt }) {
                         `)}
                     </div>
                 `}
-            ${lightbox ? html`
-                <div class="lightbox" onClick=${() => setLightbox(null)}>
-                    <img src=${lightbox} onClick=${e => e.stopPropagation()} />
-                </div>
-            ` : null}
         </div>
     `;
 }
 
-function Tile({ gen, isPrimary, canSetPrimary, onZoom, onSetPrimary, onRemix, onDelete }) {
+function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }) {
     const done = gen.status === 'done' && gen.file;
     const failed = gen.status === 'failed';
     const src = done ? `/api/asset/${gen.file}` : null;
@@ -121,7 +115,7 @@ function Tile({ gen, isPrimary, canSetPrimary, onZoom, onSetPrimary, onRemix, on
         <div class=${'gen-tile' + (isPrimary ? ' primary' : '')}>
             <div class="gen-image">
                 ${done
-                    ? html`<img src=${src} onClick=${() => onZoom(src)} />`
+                    ? html`<img src=${src} data-lightbox="gallery" onClick=${e => Lightbox.open(e.target)} />`
                     : failed
                         ? html`<div class="gen-status failed" title=${gen.error || ''}>failed</div>`
                         : html`<div class=${'gen-status ' + gen.status}>${gen.status}</div>`}

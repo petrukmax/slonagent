@@ -69,7 +69,12 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 
 /* Lightbox */
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: flex; align-items: center; justify-content: center; z-index: 200; cursor: zoom-out; padding: 40px; }
-.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); cursor: default; }
+.lb-arrow { position: absolute; top: 50%; transform: translateY(-50%); font-size: 48px; color: rgba(255,255,255,0.6); cursor: pointer; padding: 20px; user-select: none; }
+.lb-arrow:hover { color: #fff; }
+.lb-prev { left: 8px; }
+.lb-next { right: 8px; }
+.lb-counter { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.5); font-size: 13px; }
 .gen-status { font-size: 11px; color: var(--text-dim); text-transform: uppercase; padding: 4px 8px; }
 .gen-status.queued { color: var(--text-dim); }
 .gen-status.generating { color: var(--warn); animation: pulse 1.5s infinite; }
