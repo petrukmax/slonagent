@@ -35,8 +35,12 @@ export class Chat extends Component {
         }
     }
 
-    componentDidUpdate() {
-        if (this._scroll) this._scroll.scrollTop = this._scroll.scrollHeight;
+    componentDidUpdate(_, prevState) {
+        const el = this._scroll;
+        if (el && prevState.messages.length < this.state.messages.length
+            && el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+            el.scrollTop = el.scrollHeight;
+        }
     }
 
     submit() {
