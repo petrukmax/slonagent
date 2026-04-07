@@ -2,7 +2,8 @@ import asyncio
 import contextlib
 import json
 import logging
-import webbrowser
+
+log = logging.getLogger(__name__)
 from collections import deque
 from contextvars import ContextVar
 from datetime import datetime
@@ -160,11 +161,7 @@ class Dashboard:
             finally:
                 self._clients.discard(websocket)
 
-        async def open_browser():
-            await asyncio.sleep(1.0)
-            webbrowser.open(f"http://localhost:{self._port}")
-
-        asyncio.create_task(open_browser())
+        log.info("Dashboard: http://localhost:%d", self._port)
 
         config = uvicorn.Config(
             app,

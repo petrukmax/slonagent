@@ -43,6 +43,7 @@ class MovieCreatorSkill(Skill):
         server = MovieServer(self._port, project_dir)
         server.generator = Generator(server, self._gemini_key, self._muapi_key)
         await server.start()
+        await self.agent.transport.send_message(f"Movie Creator: {server.url}")
 
         multi = MultiTransport([self.agent.transport, WebTransport(server)])
         sub.transport = multi

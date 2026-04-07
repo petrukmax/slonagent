@@ -3,7 +3,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import webbrowser
 from dataclasses import asdict
 from pathlib import Path
 
@@ -45,6 +44,7 @@ class MovieServer:
         self._on_chat: list = []
         self._on_tab_changed: list = []
         self._pending_approval: asyncio.Future | None = None
+        self.url: str | None = None
         self._setup_routes()
 
     async def save(self):
@@ -230,4 +230,4 @@ class MovieServer:
             await asyncio.sleep(0.1)
         else:
             raise RuntimeError(f"Failed to start server on port {self.port}")
-        webbrowser.open(f"http://localhost:{self.port}")
+        self.url = f"http://localhost:{self.port}"
