@@ -268,7 +268,17 @@ class SandboxSkill(Skill):
             p = f"/mnt/{p[0]}{p[2:]}"
         return p
 
+    async def _ensure_machine(self):
+        info = await self._run(
+            [self.runtime, "machine", "info", "--format", "{{.Host.MachineState}}"],
+            capture_output=True, text=True,
+        )
+        if info.returncode != 0 or info.stdout.strip().lower() != "running":
+            logging.info("[exec] Starting podman machine...")
+            await self._run([self.runtime, "machine", "start"], check=True)
+
     async def _ensure_container(self):
+        await self._ensure_machine()
         volume_args = self._volume_args()
         desired_mounts = {
             (self._norm(self.workspace_dir), "/workspace"),
@@ -287,7 +297,9 @@ class SandboxSkill(Skill):
         if inspect.returncode != 0:
             img = await self._run([self.runtime, "image", "exists", env_image], capture_output=True)
             image = env_image if img.returncode == 0 else self.image
-            await self._run([self.runtime, "run", "-d", "--no-hosts", "--name", self.container_name, *volume_args, image, "sleep", "infinity"], check=True)
+            run = await self._run([self.runtime, "run", "-d", "--no-hosts", "--name", self.container_name, *volume_args, image, "sleep", "infinity"], capture_output=True, text=True)
+            if run.returncode != 0:
+                raise RuntimeError(f"podman run failed ({run.returncode}): {run.stderr.strip()}")
             logging.info("[exec] Контейнер %s создан (образ: %s)", self.container_name, image)
         else:
             lines = inspect.stdout.strip().splitlines()
