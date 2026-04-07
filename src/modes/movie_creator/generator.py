@@ -44,7 +44,8 @@ class Generator:
             if gen.model == "gemini-image":
                 data = await self._gemini_image(gen.prompt, refs)
             elif gen.model == "seedream-v5":
-                data = await self._muapi_image("seedream-5.0", gen.prompt)
+                endpoint = "seedream-5.0-edit" if refs else "seedream-5.0"
+                data = await self._muapi_image(endpoint, gen.prompt, refs)
             elif gen.model == "seedance-character":
                 data, character_id = await self._muapi_character(gen.prompt, refs)
                 gen.character_id = character_id
@@ -121,6 +122,23 @@ class Generator:
             elif status == "failed":
                 raise RuntimeError(f"muapi failed: {data.get('error', 'unknown')}")
 
+    async def _muapi_upload(self, path) -> str:
+        """Upload a local file to muapi CDN, return public URL."""
+        filename = path.name
+        resp = await asyncio.to_thread(
+            requests.get,
+            f"https://muapi.ai/api/app/get_file_upload_url?filename={filename}",
+            headers={"x-api-key": self.muapi_key}, timeout=30,
+        )
+        data = resp.json()
+        fields = data["fields"]
+        mime = "image/png" if path.suffix == ".png" else "image/jpeg"
+        await asyncio.to_thread(
+            requests.post, data["url"],
+            data=fields, files={"file": (filename, path.read_bytes(), mime)}, timeout=120,
+        )
+        return f"https://cdn.muapi.ai/{fields['key']}"
+
     async def _muapi_character(self, prompt: str, refs: list) -> tuple[bytes, str]:
         """Create character sheet, return (image_bytes, character_id)."""
         if not self.muapi_key:
@@ -128,9 +146,8 @@ class Generator:
         images_list = []
         for ref_path in refs:
             if ref_path.exists():
-                mime = "image/png" if ref_path.suffix == ".png" else "image/jpeg"
-                data = base64.b64encode(ref_path.read_bytes()).decode()
-                images_list.append(f"data:{mime};base64,{data}")
+                url = await self._muapi_upload(ref_path)
+                images_list.append(url)
         payload = {"prompt": prompt}
         if images_list:
             payload["images_list"] = images_list
@@ -151,15 +168,25 @@ class Generator:
         img_resp = await asyncio.to_thread(requests.get, outputs[0], timeout=120)
         return img_resp.content, request_id
 
-    async def _muapi_image(self, endpoint: str, prompt: str) -> bytes:
+    async def _muapi_image(self, endpoint: str, prompt: str, refs: list = None) -> bytes:
         """Submit to muapi.ai, poll for result, download image."""
         if not self.muapi_key:
             raise RuntimeError("MUAPI_API_KEY not set")
 
+        payload = {"prompt": prompt, "aspect_ratio": "16:9", "quality": "high"}
+        if refs:
+            images_list = []
+            for ref_path in refs:
+                if ref_path.exists():
+                    url = await self._muapi_upload(ref_path)
+                    images_list.append(url)
+            if images_list:
+                payload["images_list"] = images_list
+
         resp = await asyncio.to_thread(
             requests.post,
             f"https://api.muapi.ai/api/v1/{endpoint}",
-            json={"prompt": prompt, "aspect_ratio": "16:9", "quality": "high"},
+            json=payload,
             headers=self._muapi_headers(), timeout=60,
         )
         if resp.status_code != 200:
