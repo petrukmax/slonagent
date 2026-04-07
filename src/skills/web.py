@@ -1,14 +1,18 @@
 import base64
+import html as html_mod
+import io
 import re
 
 import requests
+from markdownify import markdownify
+from PIL import Image
 from typing import Annotated
 from agent import Skill, tool
 
-MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5MB
+MAX_TEXT_CHARS = 50_000
+MAX_IMAGE_SIDE = 1024
 DEFAULT_TIMEOUT = 30
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
-
 
 class WebSkill(Skill):
     def __init__(self, api_key: str):
@@ -57,35 +61,35 @@ class WebSkill(Skill):
                     "Accept-Language": "en-US,en;q=0.9",
                 })
             response.raise_for_status()
-            if len(response.content) > MAX_RESPONSE_SIZE:
-                return {"error": "Response too large (exceeds 5MB)"}
-
             content_type = response.headers.get("content-type", "")
             mime = content_type.split(";")[0].strip().lower()
 
-            # Images → base64 attachment
+            # Images → resize and base64 attachment
             if mime.startswith("image/") and mime not in ("image/svg+xml",):
-                b64 = base64.b64encode(response.content).decode()
-                return {"_parts": [{"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]}
+                img = Image.open(io.BytesIO(response.content))
+                img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                return {"_parts": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}
 
             text = response.text
 
             if format == "markdown" and "html" in content_type:
-                from markdownify import markdownify
                 text = markdownify(text, heading_style="ATX", strip=["script", "style", "meta", "link"])
             elif format == "text" and "html" in content_type:
-                text = _html_to_text(text)
+                text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r'<[^>]+>', ' ', text)
+                text = html_mod.unescape(text)
+                text = re.sub(r'\s+', ' ', text).strip()
 
-            return {"url": url, "content": text, "content_type": content_type}
+            result = {"url": url, "content_type": content_type}
+            if len(text) > MAX_TEXT_CHARS:
+                result["content"] = text[:MAX_TEXT_CHARS]
+                result["error"] = "Overflow, output truncated"
+            else:
+                result["content"] = text
+            return result
         except Exception as e:
             return {"error": str(e)}
-
-
-def _html_to_text(html: str) -> str:
-    import html as html_mod
-    text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<[^>]+>', ' ', text)
-    text = html_mod.unescape(text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text

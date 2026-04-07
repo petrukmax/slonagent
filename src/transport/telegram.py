@@ -302,7 +302,7 @@ class TelegramTransport(BaseTransport):
             ):
                 continue
             
-            wait = (4.0 if item["kind"]=="edit" else 1.0) - max(0, asyncio.get_event_loop().time() - last_action)
+            wait = (2.0 if item["kind"]=="edit" else 1.0) - max(0, asyncio.get_event_loop().time() - last_action)
             if wait > 0: await asyncio.sleep(wait)
 
             future = item.get("future")
