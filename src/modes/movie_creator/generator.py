@@ -162,11 +162,12 @@ class Generator:
         if not request_id:
             raise RuntimeError(f"No request_id: {resp.text[:300]}")
         result = await self._muapi_poll(request_id)
-        outputs = result.get("outputs") or []
-        if not outputs:
-            raise RuntimeError("Completed but no outputs")
-        img_resp = await asyncio.to_thread(requests.get, outputs[0], timeout=120)
-        return img_resp.content, request_id
+        character_id = (result.get("outputs") or [request_id])[0]
+        sheet_url = result.get("sheet_url")
+        if not sheet_url:
+            raise RuntimeError(f"No sheet_url in character result: {list(result.keys())}")
+        img_resp = await asyncio.to_thread(requests.get, sheet_url, timeout=120)
+        return img_resp.content, character_id
 
     async def _muapi_image(self, endpoint: str, prompt: str, refs: list = None) -> bytes:
         """Submit to muapi.ai, poll for result, download image."""
