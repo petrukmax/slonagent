@@ -208,6 +208,7 @@ class TelegramSkill(Skill):
 
 class TelegramTransport(BaseTransport):
     def __init__(self, bot: Bot, chat_id: int, thread_id: int | None = None, verbose: bool = True, agent_id: str = ""):
+        super().__init__()
         self.bot = bot
         self.chat_id = chat_id
         self.thread_id = thread_id
