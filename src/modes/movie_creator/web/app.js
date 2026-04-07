@@ -15,6 +15,7 @@ import { FolderList } from './components/FolderList.js';
 import { FolderForm } from './components/FolderForm.js';
 import './common/Dialog.js';
 import { Chat } from './components/Chat.js';
+import { GenerationIndicator } from './components/GenerationIndicator.js';
 
 export let app = null;
 
@@ -94,6 +95,8 @@ class App extends Component {
             centerView = html`<div class="center-empty">Select an entity</div>`;
         }
 
+        if (!connected) return html`<div class="disconnected">App disconnected</div>`;
+
         return html`
             <div class="tabs">
                 ${['screenplay', 'characters', 'storyboard', 'library'].map(t => html`
@@ -101,9 +104,7 @@ class App extends Component {
                         ${t.charAt(0).toUpperCase() + t.slice(1)}
                     </div>
                 `)}
-                <span class="status" style=${{ color: connected ? 'var(--green)' : 'var(--red)' }}>
-                    ${connected ? '\u25CF' : '\u25CB'}
-                </span>
+                <${GenerationIndicator} />
             </div>
             <div class="main">
                 <div class="sidebar">${sidebarView}</div>
