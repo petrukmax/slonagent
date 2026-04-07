@@ -3,18 +3,25 @@ from src.transport.base import BaseTransport
 
 
 class MultiTransport(BaseTransport):
-    """Broadcasts all events to a list of child transports.
-
-    Does not call set_agent on children — they keep their own agent binding.
-    process_message goes through self.agent to avoid duplicates.
-    """
+    """Broadcasts all events to a list of child transports."""
 
     def __init__(self, transports: list[BaseTransport]):
         super().__init__()
         self.transports = transports
 
     def set_agent(self, agent):
-        self.agent = agent
+        super().set_agent(agent)
+        for t in self.transports:
+            t.set_agent(agent)
+            t.on_message = lambda parts, uid=None, src=t: self._child_message(src, parts, uid)
+
+    async def _child_message(self, source, content_parts, user_message_id=None):
+        text = "\n".join(p.get("text", "") for p in content_parts if p.get("type") == "text")
+        if text:
+            for t in self.transports:
+                if t is not source:
+                    await t.inject_message(text)
+        await self.agent.process_message(content_parts, user_message_id)
 
     async def send_message(self, text, stream_id=None, final=True):
         for t in self.transports:
@@ -43,6 +50,3 @@ class MultiTransport(BaseTransport):
     async def inject_message(self, text):
         for t in self.transports:
             await t.inject_message(text)
-
-    async def process_message(self, content_parts, user_message_id=None):
-        await self.agent.process_message(content_parts, user_message_id)

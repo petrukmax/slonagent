@@ -62,11 +62,6 @@ class MovieCreatorSkill(Skill):
         server.on_tab_changed(on_tab)
         on_tab("screenplay")
 
-        async def _on_chat(text):
-            await sub.transport.inject_message(text)
-            await sub.transport.process_message([{"type": "text", "text": text}])
-        server.on_chat(_on_chat)
-
         # Chat loop
         while True:
             content_parts, _ = await sub.next_message()

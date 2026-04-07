@@ -146,6 +146,7 @@ class MovieServer:
                 self._pending_approval.set_result(msg)
 
         elif t == "chat":
+            await self.send("message", role="user", text=msg["text"])
             for cb in self._on_chat:
                 await cb(msg["text"])
 

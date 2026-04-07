@@ -1,9 +1,16 @@
+import logging
+
+log = logging.getLogger(__name__)
+
+
 class BaseTransport:
     def __init__(self):
         self.agent = None
+        self.on_message = None
 
     def set_agent(self, agent):
         self.agent = agent
+        self.on_message = agent.process_message
 
     def get_skill(self):
         return None
@@ -24,7 +31,10 @@ class BaseTransport:
         pass
 
     async def process_message(self, content_parts: list, user_message_id=None):
-        await self.agent.process_message(content_parts=content_parts, user_message_id=user_message_id)
+        if self.on_message:
+            await self.on_message(content_parts, user_message_id)
+        else:
+            log.warning("process_message called but on_message not set")
 
     async def send_processing(self, active: bool):
         pass
