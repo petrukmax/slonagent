@@ -10,7 +10,7 @@ class LightboxView extends Component {
     }
 
     _images() {
-        return [...document.querySelectorAll(`img[data-lightbox="${this.state.group}"]`)].map(el => el.src);
+        return [...document.querySelectorAll(`img[data-lightbox="${this.state.group}"]`)].map(el => el.dataset.full || el.src);
     }
 
     open(el) {

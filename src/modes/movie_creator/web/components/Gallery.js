@@ -110,12 +110,13 @@ export function Gallery({ kind, defaultPrompt }) {
 function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }) {
     const done = gen.status === 'done' && gen.file;
     const failed = gen.status === 'failed';
-    const src = done ? `/api/asset/${gen.file}` : null;
+    const thumb = done ? `/api/asset/800x800/${gen.file}` : null;
+    const full = done ? `/api/asset/${gen.file}` : null;
     return html`
         <div class=${'gen-tile' + (isPrimary ? ' primary' : '')}>
             <div class="gen-image">
                 ${done
-                    ? html`<img src=${src} data-lightbox="gallery" onClick=${e => Lightbox.open(e.target)} />`
+                    ? html`<img src=${thumb} data-full=${full} data-lightbox="gallery" onClick=${e => Lightbox.open(e.target)} />`
                     : failed
                         ? html`<div class="gen-status failed" title=${gen.error || ''}>failed</div>`
                         : html`<div class=${'gen-status ' + gen.status}>${gen.status}</div>`}

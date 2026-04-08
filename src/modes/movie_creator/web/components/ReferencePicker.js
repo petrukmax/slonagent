@@ -66,7 +66,7 @@ export function ReferencePicker({ name }) {
                             onClick=${() => toggle(img.file)}
                             title=${img.label}
                         >
-                            <img src=${'/api/asset/' + img.file} />
+                            <img src=${'/api/asset/200x200/' + img.file} />
                         </div>
                     `)}
             </div>

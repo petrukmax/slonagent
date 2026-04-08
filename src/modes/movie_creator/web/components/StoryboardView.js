@@ -50,7 +50,8 @@ export function StoryboardView() {
 
 function ShotCard({ scene, shot, index }) {
     const primary = shot.generations?.[shot.primary_generation_id];
-    const thumb = primary?.file ? `/api/asset/${primary.file}` : null;
+    const thumb = primary?.file ? `/api/asset/400x400/${primary.file}` : null;
+    const full = primary?.file ? `/api/asset/${primary.file}` : null;
     const description = shot.description || '(empty)';
 
     function edit(e) {
@@ -67,7 +68,7 @@ function ShotCard({ scene, shot, index }) {
     return html`
         <div class="shot-card" onClick=${e => thumb && Lightbox.open(e.currentTarget)}>
             <div class="shot-thumb">
-                ${thumb ? html`<img src=${thumb} data-lightbox="storyboard" />` : null}
+                ${thumb ? html`<img src=${thumb} data-full=${full} data-lightbox="storyboard" />` : null}
             </div>
             <div class="shot-compact-footer">
                 <div class="shot-preview">${index + 1}. ${description}</div>

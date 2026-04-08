@@ -3,12 +3,14 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from dataclasses import asdict
 from pathlib import Path
 
 from dacite import from_dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile
 from fastapi.responses import HTMLResponse, FileResponse
+from PIL import Image
 
 from src.modes.movie_creator.project import Project, Generation
 
@@ -56,8 +58,15 @@ class MovieServer:
         )
         await self.send("project_updated", project=data)
 
+    def _make_thumbnail(self, original: Path, thumb: Path, width: int, height: int):
+        thumb.parent.mkdir(parents=True, exist_ok=True)
+        with Image.open(original) as img:
+            img.thumbnail((width, height), Image.LANCZOS)
+            img.save(thumb, quality=85)
+
     def _setup_routes(self):
         no_cache = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
+        img_cache = {"Cache-Control": "max-age=86400"}
 
         @self.app.get("/")
         async def index():
@@ -73,10 +82,20 @@ class MovieServer:
 
         @self.app.get("/api/asset/{path:path}")
         async def get_asset(path: str):
+            m = re.match(r"^(\d+)x(\d+)/(.+)$", path)
+            if m:
+                width, height, rel = int(m.group(1)), int(m.group(2)), m.group(3)
+                original = self.assets_dir / rel
+                if not original.exists():
+                    return {"error": "Not found"}, 404
+                thumb = self.assets_dir / ".thumbs" / f"{width}x{height}" / rel
+                if not thumb.exists() or thumb.stat().st_mtime < original.stat().st_mtime:
+                    self._make_thumbnail(original, thumb, width, height)
+                return FileResponse(thumb, headers=img_cache)
             full = self.assets_dir / path
             if not full.exists():
                 return {"error": "Not found"}, 404
-            return FileResponse(full)
+            return FileResponse(full, headers=img_cache)
 
         @self.app.post("/api/upload")
         async def upload(file: UploadFile, path: str = "", kind: str = ""):
