@@ -32,6 +32,12 @@ const VIDEO_MODELS = [
     { id: 'seedance-txt2vid-fast', label: 'Seedance Text\u2192Vid (fast)' },
     { id: 'wan2.7-reference', label: 'Wan 2.7 Reference' },
     { id: 'wan2.7-first-last', label: 'Wan 2.7 First-Last' },
+    { id: 'evolink-seedance-txt2vid', label: 'Evolink Seedance Text\u2192Vid' },
+    { id: 'evolink-seedance-txt2vid-fast', label: 'Evolink Seedance Text\u2192Vid (fast)' },
+    { id: 'evolink-seedance-img2vid', label: 'Evolink Seedance Img\u2192Vid' },
+    { id: 'evolink-seedance-img2vid-fast', label: 'Evolink Seedance Img\u2192Vid (fast)' },
+    { id: 'evolink-seedance-ref2vid', label: 'Evolink Seedance Reference' },
+    { id: 'evolink-seedance-ref2vid-fast', label: 'Evolink Seedance Reference (fast)' },
 ];
 
 const VIDEO_IDS = new Set(VIDEO_MODELS.map(m => m.id));

@@ -27,14 +27,22 @@ MODELS = {
     "seedance-txt2vid-fast": {"type": "video", "label": "Seedance Text→Vid (fast)", "endpoint": "seedance-2-text-to-video-fast"},
     "wan2.7-reference": {"type": "video", "label": "Wan 2.7 Reference", "handler": "wan", "mode": "reference"},
     "wan2.7-first-last": {"type": "video", "label": "Wan 2.7 First-Last", "handler": "wan", "mode": "first-last"},
+    # Evolink Seedance 2.0
+    "evolink-seedance-txt2vid": {"type": "video", "label": "Evolink Seedance Text→Vid", "handler": "evolink", "model_id": "seedance-2.0-text-to-video"},
+    "evolink-seedance-txt2vid-fast": {"type": "video", "label": "Evolink Seedance Text→Vid (fast)", "handler": "evolink", "model_id": "seedance-2.0-fast-text-to-video"},
+    "evolink-seedance-img2vid": {"type": "video", "label": "Evolink Seedance Img→Vid", "handler": "evolink", "model_id": "seedance-2.0-image-to-video"},
+    "evolink-seedance-img2vid-fast": {"type": "video", "label": "Evolink Seedance Img→Vid (fast)", "handler": "evolink", "model_id": "seedance-2.0-fast-image-to-video"},
+    "evolink-seedance-ref2vid": {"type": "video", "label": "Evolink Seedance Reference", "handler": "evolink", "model_id": "seedance-2.0-reference-to-video"},
+    "evolink-seedance-ref2vid-fast": {"type": "video", "label": "Evolink Seedance Reference (fast)", "handler": "evolink", "model_id": "seedance-2.0-fast-reference-to-video"},
 }
 
 
 class Generator:
-    def __init__(self, server, gemini_key: str, muapi_key: str = ""):
+    def __init__(self, server, gemini_key: str, muapi_key: str = "", evolink_key: str = ""):
         self.server = server
         self.gemini_key = gemini_key
         self.muapi_key = muapi_key or os.getenv("MUAPI_API_KEY", "")
+        self.evolink_key = evolink_key or os.getenv("EVOLINK_API_KEY", "")
 
     async def enqueue(self, owner, kind: str, prompt: str, model: str = "gemini-image",
                       references: list = None, duration: int = 5,
@@ -69,6 +77,12 @@ class Generator:
             elif gen.model == "seedance-character":
                 data, character_id = await self._muapi_character(gen.prompt, refs)
                 gen.character_id = character_id
+            elif model_info.get("handler") == "evolink":
+                data = await self._evolink_video(
+                    model_info["model_id"], gen.prompt, refs,
+                    duration=duration, aspect_ratio=aspect_ratio,
+                    quality=gen.resolution or "720p",
+                )
             elif model_info.get("handler") == "wan":
                 data = await self._muapi_wan(
                     model_info["mode"], gen.prompt, refs,
@@ -263,6 +277,96 @@ class Generator:
         if not outputs:
             raise RuntimeError("Completed but no outputs")
         vid_resp = await asyncio.to_thread(requests.get, outputs[0], timeout=300)
+        return vid_resp.content
+
+    # -- evolink.ai --
+
+    async def _evolink_poll(self, task_id: str) -> dict:
+        headers = {"Authorization": f"Bearer {self.evolink_key}"}
+        poll_url = f"https://api.evolink.ai/v1/tasks/{task_id}"
+        while True:
+            await asyncio.sleep(5)
+            r = await asyncio.to_thread(requests.get, poll_url, headers=headers, timeout=30)
+            data = r.json()
+            status = data.get("status", "")
+            progress = data.get("progress", 0)
+            log.info("[movie] poll evolink %s → %s (%d%%)", task_id, status, progress)
+            if status == "completed":
+                return data
+            elif status == "failed":
+                error = data.get("error", {})
+                raise RuntimeError(f"evolink failed: {error.get('message', data)}")
+
+    async def _evolink_upload(self, path) -> str:
+        """Upload image to evolink CDN via base64, return public URL."""
+        data = base64.b64encode(path.read_bytes()).decode()
+        mime = "image/png" if path.suffix == ".png" else "image/jpeg"
+        payload = {
+            "base64_data": f"data:{mime};base64,{data}",
+            "file_name": path.name,
+        }
+        resp = await asyncio.to_thread(
+            requests.post,
+            "https://files-api.evolink.ai/api/v1/files/upload/base64",
+            json=payload,
+            headers={"Authorization": f"Bearer {self.evolink_key}"},
+            timeout=60,
+        )
+        result = resp.json()
+        if not result.get("success"):
+            raise RuntimeError(f"evolink upload failed: {result}")
+        url = result["data"]["file_url"]
+        log.info("[movie] evolink upload %s → %s", path.name, url)
+        return url
+
+    async def _evolink_video(self, model_id: str, prompt: str, refs: list = None,
+                              duration: int = 5, aspect_ratio: str = "16:9",
+                              quality: str = "720p") -> bytes:
+        """Evolink Seedance 2.0 video generation."""
+        if not self.evolink_key:
+            raise RuntimeError("EVOLINK_API_KEY not set")
+        payload = {
+            "model": model_id,
+            "prompt": prompt,
+            "duration": duration,
+            "quality": quality,
+            "aspect_ratio": aspect_ratio,
+            "generate_audio": True,
+        }
+        valid_refs = [r for r in (refs or []) if r.exists()]
+        if valid_refs and "image-to-video" in model_id:
+            image_urls = []
+            for ref in valid_refs[:2]:
+                image_urls.append(await self._evolink_upload(ref))
+            payload["image_urls"] = image_urls
+        elif valid_refs and "reference-to-video" in model_id:
+            image_urls = []
+            for ref in valid_refs[:9]:
+                image_urls.append(await self._evolink_upload(ref))
+            payload["image_urls"] = image_urls
+
+        api_url = "https://api.evolink.ai/v1/videos/generations"
+        log.info("[movie] POST %s model=%s payload=%s", api_url, model_id,
+                 {k: v for k, v in payload.items() if k != "image_urls"})
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.evolink_key}",
+        }
+        resp = await asyncio.to_thread(
+            requests.post, api_url,
+            json=payload, headers=headers, timeout=60,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"evolink {resp.status_code}: {resp.text[:300]}")
+        task_id = resp.json().get("id")
+        if not task_id:
+            raise RuntimeError(f"No task id: {resp.text[:300]}")
+        log.info("[movie] evolink task_id=%s", task_id)
+        result = await self._evolink_poll(task_id)
+        results = result.get("results") or []
+        if not results:
+            raise RuntimeError("Completed but no results")
+        vid_resp = await asyncio.to_thread(requests.get, results[0], timeout=300)
         return vid_resp.content
 
     async def _muapi_wan(self, mode: str, prompt: str, refs: list = None,
