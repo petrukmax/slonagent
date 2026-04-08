@@ -130,13 +130,21 @@ class Memory:
         if memory_dir is None:
             memory_dir = os.path.join(os.getcwd(), "memory")
         self.memory_dir = memory_dir
-        os.makedirs(self.memory_dir, exist_ok=True)
-        self._state_file = os.path.join(self.memory_dir, "CONTEXT.json")
-        self._turns = load_turns_json(self._state_file)
+        if not memory_dir:
+            self._state_file = ""
+            self._turns = []
+        else:
+            os.makedirs(self.memory_dir, exist_ok=True)
+            self._state_file = os.path.join(self.memory_dir, "CONTEXT.json")
+            self._turns = load_turns_json(self._state_file)
+
+    def save(self):
+        if self._state_file:
+            save_turns_json(self._state_file, self._turns)
 
     def clear(self):
         self._turns = []
-        save_turns_json(self._state_file, self._turns)
+        self.save()
 
     def copy_from(self, src: "Memory"):
         import shutil
@@ -178,7 +186,7 @@ class Memory:
         if len(result) < len(self._turns):
             old_count = len(self._turns)
             self._turns = result
-            save_turns_json(self._state_file, self._turns)
+            self.save()
             log.info("[memory] compressor: %d → %d turns", old_count, len(result))
 
         return self._turns
@@ -188,6 +196,6 @@ class Memory:
             turn = {**turn, "_timestamp": datetime.now(timezone.utc).isoformat()}
         self._turns.append(turn)
         if turn.get("role") == "assistant" and not turn.get("tool_calls"):
-            save_turns_json(self._state_file, self._turns)
+            self.save()
         for provider in self.providers:
             await provider.add_turn(turn)

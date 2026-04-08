@@ -699,8 +699,7 @@ class LogCompressor(Skill):
             if isinstance(turn, dict) and turn.get("_observation_message") and not turn.get("_raw_observations"):
                 with open(old_log, encoding="utf-8") as f:
                     turn["_raw_observations"] = f.read()
-                from src.memory.memory import save_turns_json
-                save_turns_json(self.agent.memory._state_file, self.agent.memory._turns)
+                self.agent.memory.save()
                 log.info("[LogCompressor] migrated LOG.md → _raw_observations")
                 break
         import shutil
