@@ -276,12 +276,14 @@ class TelegramTransport(BaseTransport):
     async def _exec_item(self, item):
         kind = item["kind"]
         if kind == "send":
-            return await self.bot.send_message(
+            result = await self.bot.send_message(
                 self.chat_id, item["text"],
                 message_thread_id=self.thread_id,
                 link_preview_options=self._no_link_preview,
                 **item["kwargs"],
             )
+            self._last_edit_texts[result.message_id] = item["text"]
+            return result
         elif kind == "edit":
             msg, text = item["msg"], item["text"]
             if self._last_edit_texts.get(msg.message_id) == text:
