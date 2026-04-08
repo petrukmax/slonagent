@@ -16,6 +16,10 @@ from src.modes.movie_creator.project import Project, Generation
 
 log = logging.getLogger(__name__)
 
+# Windows ProactorEventLoop logs noisy socket.shutdown errors on WS disconnect.
+logging.getLogger("asyncio").addFilter(
+    lambda r: "_call_connection_lost" not in r.getMessage())
+
 WEB_DIR = Path(__file__).parent / "web"
 
 

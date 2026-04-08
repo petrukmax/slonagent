@@ -127,12 +127,16 @@ class LightboxView extends Component {
         const hasNext = index < items.length - 1;
 
         return html`
-            <div class="lightbox" onClick=${() => this.close()}>
-                ${hasPrev && html`<div class="lb-arrow lb-prev" onClick=${e => { e.stopPropagation(); this.setState({ index: index - 1 }); }}>\u2039</div>`}
+            <div class="lightbox"
+                onMouseDown=${e => { this._downTarget = e.target; }}
+                onMouseUp=${e => { if (e.target === this._downTarget) this.close(); }}>
+                ${hasPrev && html`<div class="lb-arrow lb-prev" onMouseDown=${e => e.stopPropagation()}
+                    onClick=${() => this.setState({ index: index - 1 })}>\u2039</div>`}
                 ${item.isVideo
-                    ? html`<video src=${item.src} controls autoplay onClick=${e => e.stopPropagation()} />`
+                    ? html`<video src=${item.src} controls autoplay onMouseDown=${e => e.stopPropagation()} />`
                     : html`<${CropImage} src=${item.src} />`}
-                ${hasNext && html`<div class="lb-arrow lb-next" onClick=${e => { e.stopPropagation(); this.setState({ index: index + 1 }); }}>\u203A</div>`}
+                ${hasNext && html`<div class="lb-arrow lb-next" onMouseDown=${e => e.stopPropagation()}
+                    onClick=${() => this.setState({ index: index + 1 })}>\u203A</div>`}
                 <div class="lb-counter">${index + 1} / ${items.length}</div>
             </div>
         `;

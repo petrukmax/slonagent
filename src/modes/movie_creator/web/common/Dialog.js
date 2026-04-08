@@ -16,8 +16,10 @@ class DialogHost extends Component {
         const { content } = this.state;
         if (!content) return null;
         return html`
-            <div class="modal-backdrop" onClick=${() => Dialog.close()}>
-                <div class="modal" onClick=${e => e.stopPropagation()}>${content}</div>
+            <div class="modal-backdrop"
+                onMouseDown=${e => { this._downTarget = e.target; }}
+                onMouseUp=${e => { if (e.target === this._downTarget) Dialog.close(); }}>
+                <div class="modal" onMouseDown=${e => e.stopPropagation()}>${content}</div>
             </div>
         `;
     }
