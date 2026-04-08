@@ -1,5 +1,5 @@
 """
-Тесты SummaryProvider и ToolProvider с мок-LLM.
+Тесты ToolProvider с мок-LLM.
 
 Запуск:
     venv\\Scripts\\python -m pytest tests/test_providers.py -v
@@ -7,7 +7,7 @@
 import json
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -70,88 +70,6 @@ PENDING = [
     {"role": "assistant", "content": "Привет, Иван!"},
 ]
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# SummaryProvider
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestSummaryProvider:
-
-    async def _make_provider(self, tmp_path):
-        from src.memory.providers.summary import SummaryProvider
-        agent = make_agent(tmp_path)
-        p = SummaryProvider(model_name="test", api_key="test", base_url="http://test")
-        p.register(agent)
-        await p.start()
-        return p
-
-    @pytest.mark.asyncio
-    async def test_consolidate_writes_memory_and_history(self, tmp_path):
-        p = await self._make_provider(tmp_path)
-
-        llm_args = {
-            "history_entry": "[2024-01-01 12:00] Иван представился.",
-            "memory_update": "Пользователь: Иван",
-        }
-        p._client.chat.completions.create = AsyncMock(
-            return_value=make_llm_response("save_memory", llm_args)
-        )
-
-        await p._consolidate(PENDING)
-
-        assert os.path.exists(p.memory_file)
-        assert os.path.exists(p.history_file)
-        with open(p.memory_file, encoding="utf-8") as f:
-            assert "Иван" in f.read()
-        with open(p.history_file, encoding="utf-8") as f:
-            assert "Иван представился" in f.read()
-
-    @pytest.mark.asyncio
-    async def test_consolidate_no_tool_call_does_not_crash(self, tmp_path):
-        p = await self._make_provider(tmp_path)
-        p._client.chat.completions.create = AsyncMock(
-            return_value=make_text_response("OK")
-        )
-        await p._consolidate(PENDING)
-        # Файлы не созданы, но и исключения нет
-        assert not os.path.exists(p.memory_file)
-
-    @pytest.mark.asyncio
-    async def test_get_context_prompt_empty(self, tmp_path):
-        p = await self._make_provider(tmp_path)
-        prompt = await p.get_context_prompt()
-        assert "пусто" in prompt.lower()
-
-    @pytest.mark.asyncio
-    async def test_get_context_prompt_with_memory(self, tmp_path):
-        p = await self._make_provider(tmp_path)
-        with open(p.memory_file, "w", encoding="utf-8") as f:
-            f.write("Пользователь: Иван")
-        prompt = await p.get_context_prompt()
-        assert "Иван" in prompt
-
-    @pytest.mark.asyncio
-    async def test_read_history_tool_empty(self, tmp_path):
-        p = await self._make_provider(tmp_path)
-        result = p.read_history("anything")
-        assert "пуст" in result["result"].lower()
-
-    @pytest.mark.asyncio
-    async def test_read_history_tool_finds_match(self, tmp_path):
-        p = await self._make_provider(tmp_path)
-        with open(p.history_file, "w", encoding="utf-8") as f:
-            f.write("2024-01-01 Иван представился\n")
-            f.write("2024-01-02 Обсуждали Python\n")
-        result = p.read_history("Иван")
-        assert "Иван" in result["result"]
-
-    @pytest.mark.asyncio
-    async def test_read_history_tool_no_match(self, tmp_path):
-        p = await self._make_provider(tmp_path)
-        with open(p.history_file, "w", encoding="utf-8") as f:
-            f.write("2024-01-01 Иван представился\n")
-        result = p.read_history("Python")
-        assert "не найдено" in result["result"].lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
