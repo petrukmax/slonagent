@@ -158,6 +158,8 @@ class MovieServer:
                     msg.get("prompt", ""),
                     model=msg.get("model", "gemini-image"),
                     references=ref_paths,
+                    duration=msg.get("duration", 5),
+                    aspect_ratio=msg.get("aspect_ratio", "16:9"),
                 ))
 
         elif t == "approval_response":

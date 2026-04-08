@@ -33,12 +33,15 @@ export function Select({ name, label, options }) {
     `;
 }
 
-export function Text({ name, label, placeholder }) {
+export function Text({ name, label, placeholder, type, min, max, step }) {
     const f = useField(name);
+    const isNumber = type === 'number';
     return html`
         <div class="field">
             <label>${label}</label>
-            <input type="text" placeholder=${placeholder || ''} value=${f.value} onInput=${e => f.set(e.target.value)} />
+            <input type=${type || 'text'} placeholder=${placeholder || ''} value=${f.value}
+                min=${min} max=${max} step=${step}
+                onInput=${e => f.set(isNumber ? Number(e.target.value) : e.target.value)} />
         </div>
     `;
 }

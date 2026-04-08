@@ -11,16 +11,29 @@ import { html, useState } from '../lib.js';
 import { app } from '../app.js';
 import { Lightbox } from '../common/Lightbox.js';
 import { useEntity } from '../common/EntityView.js';
-import { Select, Textarea } from '../common/Form.js';
-import { FormView } from '../common/FormView.js';
+import { Form, Select, Text, Textarea } from '../common/Form.js';
 import { Dialog } from '../common/Dialog.js';
 import { ReferencePicker } from './ReferencePicker.js';
 
-const MODELS = [
+const IMAGE_MODELS = [
     { id: 'gemini-image', label: 'Nano Banana 2' },
     { id: 'seedream-v5', label: 'Seedream 5.0' },
     { id: 'seedance-character', label: 'Seedance Character' },
 ];
+
+const VIDEO_MODELS = [
+    { id: 'seedance-omni-ref', label: 'Seedance Omni Ref' },
+    { id: 'seedance-omni-ref-fast', label: 'Seedance Omni Ref (fast)' },
+    { id: 'seedance-first-last', label: 'Seedance First-Last Frame' },
+    { id: 'seedance-first-last-fast', label: 'Seedance First-Last (fast)' },
+    { id: 'seedance-img2vid', label: 'Seedance Img\u2192Vid' },
+    { id: 'seedance-img2vid-fast', label: 'Seedance Img\u2192Vid (fast)' },
+    { id: 'seedance-txt2vid', label: 'Seedance Text\u2192Vid' },
+    { id: 'seedance-txt2vid-fast', label: 'Seedance Text\u2192Vid (fast)' },
+];
+
+const VIDEO_IDS = new Set(VIDEO_MODELS.map(m => m.id));
+
 let lastModel = 'gemini-image';
 
 async function uploadFile(file, path, kind) {
@@ -35,9 +48,15 @@ export function Gallery({ kind, defaultPrompt }) {
     if (!ctx?.entity?.id) return null;
     const { entity, path } = ctx;
     const [dragover, setDragover] = useState(false);
-    const gens = Object.values(entity.generations || {}).filter(g => g.kind === kind);
+    const [filter, setFilter] = useState('all');
+    const allGens = Object.values(entity.generations || {}).filter(g => g.kind === kind);
+    const gens = filter === 'all' ? allGens
+        : filter === 'image' ? allGens.filter(g => g.media_type !== 'video')
+        : allGens.filter(g => g.media_type === 'video');
     const hasPrimary = 'primary_generation_id' in entity;
     const primaryId = hasPrimary ? (entity.primary_generation_id || '') : '';
+    const imageCount = allGens.filter(g => g.media_type !== 'video').length;
+    const videoCount = allGens.filter(g => g.media_type === 'video').length;
 
     function handleFiles(files) {
         for (const f of files) {
@@ -60,7 +79,7 @@ export function Gallery({ kind, defaultPrompt }) {
         const title = `Generate: ${entity.name || entity.title || entity.description || 'item'}`;
         Dialog.open(html`<${GenerateDialog}
             title=${title} path=${path} kind=${kind}
-            initial=${{ prompt: initial, model: model || lastModel, references: initialRefs || [] }}
+            initial=${{ prompt: initial, model: model || lastModel, references: initialRefs || [], duration: 5, aspect_ratio: '16:9' }}
         />`);
     }
 
@@ -83,8 +102,12 @@ export function Gallery({ kind, defaultPrompt }) {
             onPaste=${onPaste}
         >
             <div class="gen-gallery-header">
-                <span>${kind}s</span>
-                <button class="btn btn-sm btn-primary" onClick=${newGen}>+ New generation</button>
+                <div class="gen-filter">
+                    <button class=${'btn btn-sm' + (filter === 'all' ? ' btn-primary' : '')} onClick=${() => setFilter('all')}>All (${allGens.length})</button>
+                    <button class=${'btn btn-sm' + (filter === 'image' ? ' btn-primary' : '')} onClick=${() => setFilter('image')}>Images (${imageCount})</button>
+                    <button class=${'btn btn-sm' + (filter === 'video' ? ' btn-primary' : '')} onClick=${() => setFilter('video')}>Videos (${videoCount})</button>
+                </div>
+                <button class="btn btn-sm btn-primary" onClick=${newGen}>+ Generate</button>
             </div>
             ${gens.length === 0
                 ? html`<div class="gen-empty">No generations yet</div>`
@@ -110,18 +133,21 @@ export function Gallery({ kind, defaultPrompt }) {
 function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }) {
     const done = gen.status === 'done' && gen.file;
     const failed = gen.status === 'failed';
-    const thumb = done ? `/api/asset/800x800/${gen.file}` : null;
+    const isVideo = gen.media_type === 'video';
+    const thumb = done ? `/api/asset/800x800/${gen.poster || gen.file}` : null;
     const full = done ? `/api/asset/${gen.file}` : null;
     return html`
         <div class=${'gen-tile' + (isPrimary ? ' primary' : '')}>
             <div class="gen-image">
                 ${done
-                    ? html`<img src=${thumb} data-full=${full} data-lightbox="gallery" onClick=${e => Lightbox.open(e.target)} />`
+                    ? html`<img src=${thumb} data-full=${full} data-video=${isVideo ? '1' : undefined}
+                        data-lightbox="gallery" onClick=${e => Lightbox.open(e.target)} />`
                     : failed
                         ? html`<div class="gen-status failed" title=${gen.error || ''}>failed</div>`
                         : html`<div class=${'gen-status ' + gen.status}>${gen.status}</div>`}
                 ${isPrimary ? html`<div class="gen-primary-badge">primary</div>` : null}
                 ${gen.model ? html`<div class="gen-model">${gen.model}</div>` : null}
+                ${isVideo && done ? html`<div class="gen-video-badge">\u25B6</div>` : null}
             </div>
             <div class="gen-prompt" title=${gen.prompt}>${gen.prompt}</div>
             <div class="gen-actions">
@@ -136,23 +162,52 @@ function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }
 }
 
 function GenerateDialog({ title, initial, path, kind }) {
-    function generate(draft) {
+    const [draft, setDraft] = useState(initial);
+    const isVideo = VIDEO_IDS.has(draft.model);
+    const models = isVideo ? VIDEO_MODELS : IMAGE_MODELS;
+
+    function generate() {
         lastModel = draft.model;
-        app.send({ type: 'generate', path, kind, prompt: draft.prompt, model: draft.model, references: draft.references || [] });
+        const msg = { type: 'generate', path, kind, prompt: draft.prompt, model: draft.model, references: draft.references || [] };
+        if (isVideo) {
+            msg.duration = draft.duration || 5;
+            msg.aspect_ratio = draft.aspect_ratio || '16:9';
+        }
+        app.send(msg);
         Dialog.close();
     }
 
     return html`
-        <${FormView}
-            heading=${title}
-            entity=${initial}
-            className="generate-dialog"
-            left=${() => [{ label: 'Cancel', onClick: () => Dialog.close() }]}
-            right=${draft => [{ label: 'Generate', cls: 'primary', onClick: () => generate(draft) }]}
-        >
-            <${Select} name="model" label="Model" options=${MODELS} />
-            <${Textarea} name="prompt" label="Prompt" placeholder="Describe the image or video..." grow />
-            <${ReferencePicker} name="references" />
-        <//>
+        <div class="editor generate-dialog">
+            <div class="editor-header"><h2>${title}</h2></div>
+            <div class="editor-body">
+                <${Form} draft=${draft} onChange=${setDraft}>
+                    <div class="gen-type-tabs">
+                        <button class=${'btn btn-sm' + (!isVideo ? ' btn-primary' : '')}
+                            onClick=${() => isVideo && setDraft({ ...draft, model: IMAGE_MODELS[0].id })}>Image</button>
+                        <button class=${'btn btn-sm' + (isVideo ? ' btn-primary' : '')}
+                            onClick=${() => !isVideo && setDraft({ ...draft, model: VIDEO_MODELS[0].id })}>Video</button>
+                    </div>
+                    <${Select} name="model" label="Model" options=${models} />
+                    <${Textarea} name="prompt" label="Prompt" placeholder="Describe the image or video..." grow />
+                    ${isVideo && html`
+                        <div class="gen-video-params">
+                            <${Text} name="duration" label="Duration (sec)" type="number" min=${5} max=${15} />
+                            <${Select} name="aspect_ratio" label="Aspect ratio" options=${[
+                                { id: '16:9', label: '16:9' },
+                                { id: '9:16', label: '9:16' },
+                                { id: '1:1', label: '1:1' },
+                            ]} />
+                        </div>
+                    `}
+                    <${ReferencePicker} name="references" />
+                <//>
+            </div>
+            <div class="editor-footer">
+                <button class="btn" onClick=${() => Dialog.close()}>Cancel</button>
+                <div class="spacer"></div>
+                <button class="btn btn-primary" onClick=${generate}>Generate</button>
+            </div>
+        </div>
     `;
 }

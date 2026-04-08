@@ -9,16 +9,19 @@ class LightboxView extends Component {
         _instance = this;
     }
 
-    _images() {
-        return [...document.querySelectorAll(`img[data-lightbox="${this.state.group}"]`)].map(el => el.dataset.full || el.src);
+    _items() {
+        return [...document.querySelectorAll(`img[data-lightbox="${this.state.group}"]`)].map(el => ({
+            src: el.dataset.full || el.src,
+            isVideo: !!el.dataset.video,
+        }));
     }
 
     open(el) {
-        const img = el.tagName === 'IMG' ? el : el.querySelector('img[data-lightbox]');
-        if (!img) return;
-        const group = img.dataset.lightbox;
+        const media = el.tagName === 'IMG' ? el : el.querySelector('img[data-lightbox]');
+        if (!media?.dataset?.lightbox) return;
+        const group = media.dataset.lightbox;
         const all = [...document.querySelectorAll(`img[data-lightbox="${group}"]`)];
-        const index = all.indexOf(img);
+        const index = all.indexOf(media);
         this.setState({ group, index: Math.max(0, index) });
     }
 
@@ -31,7 +34,7 @@ class LightboxView extends Component {
             if (!this.state.group) return;
             if (e.key === 'ArrowLeft') this.setState(s => ({ index: Math.max(0, s.index - 1) }));
             else if (e.key === 'ArrowRight') {
-                const len = this._images().length;
+                const len = this._items().length;
                 this.setState(s => ({ index: Math.min(len - 1, s.index + 1) }));
             } else if (e.key === 'Escape') this.close();
         });
@@ -40,18 +43,20 @@ class LightboxView extends Component {
     render() {
         const { group, index } = this.state;
         if (!group) return null;
-        const images = this._images();
-        if (!images.length) return null;
-        const src = images[index] || images[0];
+        const items = this._items();
+        if (!items.length) return null;
+        const item = items[index] || items[0];
         const hasPrev = index > 0;
-        const hasNext = index < images.length - 1;
+        const hasNext = index < items.length - 1;
 
         return html`
             <div class="lightbox" onClick=${() => this.close()}>
                 ${hasPrev && html`<div class="lb-arrow lb-prev" onClick=${e => { e.stopPropagation(); this.setState({ index: index - 1 }); }}>\u2039</div>`}
-                <img src=${src} onClick=${e => e.stopPropagation()} />
+                ${item.isVideo
+                    ? html`<video src=${item.src} controls autoplay onClick=${e => e.stopPropagation()} />`
+                    : html`<img src=${item.src} onClick=${e => e.stopPropagation()} />`}
                 ${hasNext && html`<div class="lb-arrow lb-next" onClick=${e => { e.stopPropagation(); this.setState({ index: index + 1 }); }}>\u203A</div>`}
-                <div class="lb-counter">${index + 1} / ${images.length}</div>
+                <div class="lb-counter">${index + 1} / ${items.length}</div>
             </div>
         `;
     }
@@ -63,6 +68,6 @@ document.body.appendChild(_container);
 render(html`<${LightboxView} />`, _container);
 
 export const Lightbox = {
-    open(img) { _instance?.open(img); },
+    open(el) { _instance?.open(el); },
     close() { _instance?.close(); },
 };

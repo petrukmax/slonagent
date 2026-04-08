@@ -65,11 +65,17 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .gen-tile { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .gen-tile.primary { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .gen-image { position: relative; width: 100%; aspect-ratio: 1; background: var(--surface3); border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-.gen-image img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.gen-image img, .gen-image video { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.gen-video-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 14px; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.gen-filter { display: flex; gap: 4px; flex: 1; }
+.gen-type-tabs { display: flex; gap: 4px; margin-bottom: 4px; }
+.gen-video-params { display: flex; gap: 12px; }
+.gen-video-params .form-field { flex: 1; }
+.gen-video-params input, .gen-video-params select { width: 100%; }
 
 /* Lightbox */
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: flex; align-items: center; justify-content: center; z-index: 200; cursor: zoom-out; padding: 40px; }
-.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); cursor: default; }
+.lightbox img, .lightbox video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); cursor: default; }
 .lb-arrow { position: absolute; top: 50%; transform: translateY(-50%); font-size: 48px; color: rgba(255,255,255,0.6); cursor: pointer; padding: 20px; user-select: none; }
 .lb-arrow:hover { color: #fff; }
 .lb-prev { left: 8px; }
