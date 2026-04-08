@@ -628,8 +628,9 @@ class LogCompressor(Skill):
     """
 
     def __init__(self, model_name: str, api_key: str, base_url: str,
-                 recent_tokens: int        = 6_000,
-                 min_recent_turns: int     = 10,
+                 recent_tokens: int           = 15_000,
+                 min_recent_turns: int        = 10,
+                 max_recent_turns_tokens: int = 50_000,
                  compress_after_tokens: int = 30_000,
                  reflect_after_tokens: int  = 40_000):
         super().__init__()
@@ -637,6 +638,7 @@ class LogCompressor(Skill):
         self._reflect_after_tokens  = reflect_after_tokens
         self._recent_tokens         = recent_tokens
         self._min_recent_turns      = min_recent_turns
+        self._max_recent_turns_tokens     = max_recent_turns_tokens
         self._model_name = model_name
 
         self._client = Agent.OpenAI(api_key, base_url)
@@ -724,6 +726,8 @@ class LogCompressor(Skill):
         recent, tokens = [], 0
         for turn in reversed(turns):
             t = Memory.count_tokens([turn])
+            if tokens + t > self._max_recent_turns_tokens:
+                break
             if tokens + t > recent_budget and len(recent) >= self._min_recent_turns:
                 break
             recent.append(turn)
