@@ -1,7 +1,7 @@
 // Pick reference images from across the project.
 // Shows all generations with "done" status, grouped by entity.
-// Selected images are tracked by file path.
-import { html, useState } from '../lib.js';
+// Selected images appear in a separate sortable strip above the grid.
+import { html, useState, useRef } from '../lib.js';
 import { app } from '../app.js';
 import { useField } from '../common/Form.js';
 
@@ -39,15 +39,33 @@ export function ReferencePicker({ name }) {
     const [filter, setFilter] = useState('');
     const images = collectImages(app.state.project);
     const filtered = filter ? images.filter(i => i.group === filter) : images;
+    const dragIdx = useRef(null);
 
-    function toggle(file) {
-        f.set(selected.includes(file) ? selected.filter(x => x !== file) : [...selected, file]);
+    function add(file) {
+        if (!selected.includes(file)) f.set([...selected, file]);
     }
+    function remove(file) {
+        f.set(selected.filter(x => x !== file));
+    }
+    function onDragStart(i) { dragIdx.current = i; }
+    function onDragOver(e, i) {
+        e.preventDefault();
+        if (dragIdx.current === null || dragIdx.current === i) return;
+        const reordered = [...selected];
+        const [moved] = reordered.splice(dragIdx.current, 1);
+        reordered.splice(i, 0, moved);
+        dragIdx.current = i;
+        f.set(reordered);
+    }
+    function onDragEnd() { dragIdx.current = null; }
+
+    const imageByFile = {};
+    for (const img of images) imageByFile[img.file] = img;
 
     return html`
         <div class="ref-picker">
             <div class="ref-picker-header">
-                <label>References</label>
+                <label>References${selected.length ? ` (${selected.length})` : ''}</label>
                 <div class="ref-filter">
                     ${GROUPS.map(g => html`
                         <button
@@ -57,13 +75,34 @@ export function ReferencePicker({ name }) {
                     `)}
                 </div>
             </div>
+            ${selected.length > 0 && html`
+                <div class="ref-selected">
+                    ${selected.map((file, i) => {
+                        const img = imageByFile[file];
+                        return html`
+                            <div
+                                class="ref-selected-item"
+                                draggable="true"
+                                onDragStart=${() => onDragStart(i)}
+                                onDragOver=${e => onDragOver(e, i)}
+                                onDragEnd=${onDragEnd}
+                                title=${img?.label || file}
+                            >
+                                <img src=${'/api/asset/200x200/' + file} />
+                                <button class="ref-remove" onClick=${() => remove(file)}>\u2715</button>
+                                <div class="ref-order">${i + 1}</div>
+                            </div>
+                        `;
+                    })}
+                </div>
+            `}
             <div class="ref-grid">
                 ${filtered.length === 0
                     ? html`<div class="ref-empty">No images</div>`
                     : filtered.map(img => html`
                         <div
                             class=${'ref-thumb' + (selected.includes(img.file) ? ' selected' : '')}
-                            onClick=${() => toggle(img.file)}
+                            onClick=${() => selected.includes(img.file) ? remove(img.file) : add(img.file)}
                             title=${img.label}
                         >
                             <img src=${'/api/asset/200x200/' + img.file} />
