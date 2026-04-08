@@ -21,6 +21,7 @@ class Generation:
     references: list[str] = field(default_factory=list)
     file: str = ""
     poster: str = ""
+    resolution: str = ""
     character_id: str = ""
     status: str = "generating"
     error: str = ""

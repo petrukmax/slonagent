@@ -25,6 +25,8 @@ MODELS = {
     "seedance-img2vid-fast": {"type": "video", "label": "Seedance Img→Vid (fast)", "endpoint": "seedance-2-image-to-video-fast"},
     "seedance-txt2vid": {"type": "video", "label": "Seedance Text→Vid", "endpoint": "seedance-2-text-to-video"},
     "seedance-txt2vid-fast": {"type": "video", "label": "Seedance Text→Vid (fast)", "endpoint": "seedance-2-text-to-video-fast"},
+    "wan2.7-reference": {"type": "video", "label": "Wan 2.7 Reference", "handler": "wan", "mode": "reference"},
+    "wan2.7-first-last": {"type": "video", "label": "Wan 2.7 First-Last", "handler": "wan", "mode": "first-last"},
 }
 
 
@@ -36,7 +38,7 @@ class Generator:
 
     async def enqueue(self, owner, kind: str, prompt: str, model: str = "gemini-image",
                       references: list = None, duration: int = 5,
-                      aspect_ratio: str = "16:9") -> str:
+                      aspect_ratio: str = "16:9", resolution: str = "720p") -> str:
         ref_files = [r.name for r in (references or []) if r.exists()]
         model_info = MODELS.get(model, {})
         media_type = model_info.get("type", "image")
@@ -47,6 +49,7 @@ class Generator:
             model=model,
             prompt=prompt,
             references=ref_files,
+            resolution=resolution,
         )
         owner.generations[gen.id] = gen
         await self.server.save()
@@ -66,6 +69,12 @@ class Generator:
             elif gen.model == "seedance-character":
                 data, character_id = await self._muapi_character(gen.prompt, refs)
                 gen.character_id = character_id
+            elif model_info.get("handler") == "wan":
+                data = await self._muapi_wan(
+                    model_info["mode"], gen.prompt, refs,
+                    duration=duration, resolution=gen.resolution,
+                    aspect_ratio=aspect_ratio,
+                )
             elif model_info.get("type") == "video":
                 data = await self._muapi_video(
                     model_info["endpoint"], gen.prompt, refs,
@@ -166,7 +175,7 @@ class Generator:
             if status == "completed":
                 return data
             elif status == "failed":
-                raise RuntimeError(f"muapi failed: {data.get('error', 'unknown')}")
+                raise RuntimeError(f"muapi failed: {data}")
             if asyncio.get_event_loop().time() > deadline:
                 raise RuntimeError(f"muapi poll timeout ({timeout_minutes}min), last status: {status!r}")
 
@@ -237,6 +246,64 @@ class Generator:
         if "omni-reference" in endpoint:
             payload["aspect_ratio"] = aspect_ratio
             payload["audio_files"] = []
+        api_url = f"https://api.muapi.ai/api/v1/{endpoint}"
+        log.info("[movie] POST %s payload=%s", api_url, payload)
+        resp = await asyncio.to_thread(
+            requests.post, api_url,
+            json=payload, headers=self._muapi_headers(), timeout=60,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"muapi {resp.status_code}: {resp.text[:300]}")
+        request_id = resp.json().get("request_id")
+        if not request_id:
+            raise RuntimeError(f"No request_id: {resp.text[:300]}")
+        log.info("[movie] polling %s request_id=%s", endpoint, request_id)
+        result = await self._muapi_poll(request_id)
+        outputs = result.get("outputs") or []
+        if not outputs:
+            raise RuntimeError("Completed but no outputs")
+        vid_resp = await asyncio.to_thread(requests.get, outputs[0], timeout=300)
+        return vid_resp.content
+
+    async def _muapi_wan(self, mode: str, prompt: str, refs: list = None,
+                         duration: int = 5, resolution: str = "720p",
+                         aspect_ratio: str = "16:9") -> bytes:
+        """Wan 2.7 video generation. Endpoint chosen by mode + ref count."""
+        if not self.muapi_key:
+            raise RuntimeError("MUAPI_API_KEY not set")
+        valid_refs = [r for r in (refs or []) if r.exists()]
+
+        if not valid_refs:
+            endpoint = "wan2.7-text-to-video"
+            payload = {
+                "prompt": prompt,
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+                "duration": duration,
+            }
+        elif mode == "reference":
+            endpoint = "wan2.7-reference-to-video"
+            image_url = await self._muapi_upload(valid_refs[0])
+            payload = {
+                "prompt": prompt,
+                "image_url": image_url,
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+                "duration": duration,
+            }
+        else:
+            # first-last: max 2 refs
+            endpoint = "wan2.7-image-to-video"
+            image_url = await self._muapi_upload(valid_refs[0])
+            payload = {
+                "prompt": prompt,
+                "image_url": image_url,
+                "resolution": resolution,
+                "duration": duration,
+            }
+            if len(valid_refs) >= 2:
+                payload["last_image"] = await self._muapi_upload(valid_refs[1])
+
         api_url = f"https://api.muapi.ai/api/v1/{endpoint}"
         log.info("[movie] POST %s payload=%s", api_url, payload)
         resp = await asyncio.to_thread(

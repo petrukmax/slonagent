@@ -160,6 +160,7 @@ class MovieServer:
                     references=ref_paths,
                     duration=msg.get("duration", 5),
                     aspect_ratio=msg.get("aspect_ratio", "16:9"),
+                    resolution=msg.get("resolution", "720p"),
                 ))
 
         elif t == "approval_response":

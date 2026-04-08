@@ -30,6 +30,8 @@ const VIDEO_MODELS = [
     { id: 'seedance-img2vid-fast', label: 'Seedance Img\u2192Vid (fast)' },
     { id: 'seedance-txt2vid', label: 'Seedance Text\u2192Vid' },
     { id: 'seedance-txt2vid-fast', label: 'Seedance Text\u2192Vid (fast)' },
+    { id: 'wan2.7-reference', label: 'Wan 2.7 Reference' },
+    { id: 'wan2.7-first-last', label: 'Wan 2.7 First-Last' },
 ];
 
 const VIDEO_IDS = new Set(VIDEO_MODELS.map(m => m.id));
@@ -79,7 +81,7 @@ export function Gallery({ kind, defaultPrompt }) {
         const title = `Generate: ${entity.name || entity.title || entity.description || 'item'}`;
         Dialog.open(html`<${GenerateDialog}
             title=${title} path=${path} kind=${kind}
-            initial=${{ prompt: initial, model: model || lastModel, references: initialRefs || [], duration: 5, aspect_ratio: '16:9' }}
+            initial=${{ prompt: initial, model: model || lastModel, references: initialRefs || [], duration: 5, aspect_ratio: '16:9', resolution: '720p' }}
         />`);
     }
 
@@ -143,7 +145,7 @@ function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }
                     ? html`<img src=${thumb} data-full=${full} data-video=${isVideo ? '1' : undefined}
                         data-lightbox="gallery" onClick=${e => Lightbox.open(e.target)} />`
                     : failed
-                        ? html`<div class="gen-status failed" title=${gen.error || ''}>failed</div>`
+                        ? html`<div class="gen-status failed"><div class="gen-fail-label">failed</div><div class="gen-error">${gen.error || ''}</div></div>`
                         : html`<div class=${'gen-status ' + gen.status}>${gen.status}</div>`}
                 ${isPrimary ? html`<div class="gen-primary-badge">primary</div>` : null}
                 ${gen.model ? html`<div class="gen-model">${gen.model}</div>` : null}
@@ -164,6 +166,7 @@ function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }
 function GenerateDialog({ title, initial, path, kind }) {
     const [draft, setDraft] = useState(initial);
     const isVideo = VIDEO_IDS.has(draft.model);
+    const isWan = draft.model.startsWith('wan');
     const models = isVideo ? VIDEO_MODELS : IMAGE_MODELS;
 
     function generate() {
@@ -172,6 +175,7 @@ function GenerateDialog({ title, initial, path, kind }) {
         if (isVideo) {
             msg.duration = draft.duration || 5;
             msg.aspect_ratio = draft.aspect_ratio || '16:9';
+            if (isWan) msg.resolution = draft.resolution || '720p';
         }
         app.send(msg);
         Dialog.close();
@@ -198,6 +202,12 @@ function GenerateDialog({ title, initial, path, kind }) {
                                 { id: '9:16', label: '9:16' },
                                 { id: '1:1', label: '1:1' },
                             ]} />
+                            ${isWan && html`
+                                <${Select} name="resolution" label="Resolution" options=${[
+                                    { id: '720p', label: '720p' },
+                                    { id: '1080p', label: '1080p' },
+                                ]} />
+                            `}
                         </div>
                     `}
                     <${ReferencePicker} name="references" />
