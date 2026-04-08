@@ -66,6 +66,7 @@ export function Gallery({ kind, defaultPrompt }) {
 
     function newGen() { openPrompt(defaultPrompt ? defaultPrompt(entity) : ''); }
     function remix(g) { openPrompt(g.prompt || '', g.model || lastModel, g.references || []); }
+    function useAsRef(g) { openPrompt('', lastModel, [g.file]); }
     function setPrimary(g) {
         app.send({ type: 'update', path, data: { primary_generation_id: g.id } });
     }
@@ -102,6 +103,7 @@ export function Gallery({ kind, defaultPrompt }) {
                                 canSetPrimary=${hasPrimary}
                                 onSetPrimary=${() => setPrimary(g)}
                                 onRemix=${() => remix(g)}
+                                onUseAsRef=${() => useAsRef(g)}
                                 onDelete=${() => deleteGen(g)}
                             />
                         `)}
@@ -111,7 +113,7 @@ export function Gallery({ kind, defaultPrompt }) {
     `;
 }
 
-function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }) {
+function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onUseAsRef, onDelete }) {
     const done = gen.status === 'done' && gen.file;
     const failed = gen.status === 'failed';
     const isVideo = gen.media_type === 'video';
@@ -133,10 +135,12 @@ function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }
             <div class="gen-prompt" title=${gen.prompt}>${gen.prompt}</div>
             <div class="gen-actions">
                 ${canSetPrimary && done && !isPrimary
-                    ? html`<button class="btn btn-sm" onClick=${onSetPrimary}>Set primary</button>`
+                    ? html`<button class="gen-act" title="Set primary" onClick=${onSetPrimary}>\u2713</button>`
                     : null}
-                <button class="btn btn-sm" onClick=${onRemix}>Remix</button>
-                <button class="btn btn-sm btn-danger" onClick=${onDelete}>\u2715</button>
+                ${done && html`<button class="gen-act" title="Use as reference" onClick=${onUseAsRef}>\u29C9</button>`}
+                <button class="gen-act" title="Remix" onClick=${onRemix}>\u21BB</button>
+                <div class="spacer"></div>
+                <button class="gen-act gen-act-danger" title="Delete" onClick=${onDelete}>\u2715</button>
             </div>
         </div>
     `;

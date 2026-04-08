@@ -4,12 +4,16 @@
 import { html, useState, useRef } from '../lib.js';
 import { app } from '../app.js';
 import { useField } from '../common/Form.js';
+import { Lightbox } from '../common/Lightbox.js';
 
 function gather(images, collection, group, labelFn) {
     for (const [id, entity] of Object.entries(collection || {})) {
         for (const g of Object.values(entity.generations || {})) {
-            if (g.status === 'done' && g.file)
-                images.push({ file: g.file, label: labelFn(entity, id), group, entityId: id });
+            if (g.status === 'done' && g.file) {
+                const isVideo = g.media_type === 'video';
+                const thumb = isVideo ? (g.poster || g.file) : g.file;
+                images.push({ file: g.file, thumb, isVideo, label: labelFn(entity, id), group, entityId: id });
+            }
         }
     }
 }
@@ -88,7 +92,8 @@ export function ReferencePicker({ name }) {
                                 onDragEnd=${onDragEnd}
                                 title=${img?.label || file}
                             >
-                                <img src=${'/api/asset/200x200/' + file} />
+                                <img src=${'/api/asset/200x200/' + (img?.thumb || file)} />
+                                ${img?.isVideo && html`<div class="ref-video-badge">\u25B6</div>`}
                                 <button class="ref-remove" onClick=${() => remove(file)}>\u2715</button>
                                 <div class="ref-order">${i + 1}</div>
                             </div>
@@ -103,9 +108,11 @@ export function ReferencePicker({ name }) {
                         <div
                             class=${'ref-thumb' + (selected.includes(img.file) ? ' selected' : '')}
                             onClick=${() => selected.includes(img.file) ? remove(img.file) : add(img.file)}
+                            onContextMenu=${e => { e.preventDefault(); Lightbox.open(e.currentTarget); }}
                             title=${img.label}
                         >
-                            <img src=${'/api/asset/200x200/' + img.file} />
+                            <img src=${'/api/asset/200x200/' + img.thumb} data-full=${'/api/asset/' + (img.isVideo ? img.thumb : img.file)} data-lightbox="refs" />
+                            ${img.isVideo && html`<div class="ref-video-badge">\u25B6</div>`}
                         </div>
                     `)}
             </div>

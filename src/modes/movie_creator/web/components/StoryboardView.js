@@ -66,17 +66,13 @@ function ShotCard({ scene, shot, index }) {
     }
 
     return html`
-        <div class="shot-card" onClick=${e => thumb && Lightbox.open(e.currentTarget)}>
+        <div class="shot-card" onClick=${edit}
+            onContextMenu=${e => { if (thumb) { e.preventDefault(); Lightbox.open(e.currentTarget); } }}>
             <div class="shot-thumb">
                 ${thumb ? html`<img src=${thumb} data-full=${full} data-lightbox="storyboard" />` : null}
             </div>
-            <div class="shot-compact-footer">
-                <div class="shot-preview">${index + 1}. ${description}</div>
-                <div class="shot-footer-actions">
-                    <button class="shot-btn" onClick=${edit}>\u270E</button>
-                    <button class="shot-btn shot-btn-danger" onClick=${del}>\u2715</button>
-                </div>
-            </div>
+            <div class="shot-info">${index + 1}. ${description}</div>
+            <button class="gen-act gen-act-danger shot-delete" title="Delete" onClick=${del}>\u2715</button>
             <div class="shot-desc-hover">${index + 1}. ${description}</div>
         </div>
     `;
