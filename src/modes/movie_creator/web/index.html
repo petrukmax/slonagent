@@ -80,6 +80,9 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 /* Lightbox */
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: flex; align-items: center; justify-content: center; z-index: 200; cursor: zoom-out; padding: 40px; }
 .lightbox img, .lightbox video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); cursor: default; }
+.lb-img-wrap { position: relative; max-width: 100%; max-height: 100%; display: flex; cursor: crosshair; user-select: none; }
+.lb-img-wrap img { cursor: crosshair; }
+.lb-selection { position: absolute; border: 2px solid var(--accent); background: rgba(137,180,250,0.15); pointer-events: none; }
 .lb-arrow { position: absolute; top: 50%; transform: translateY(-50%); font-size: 48px; color: rgba(255,255,255,0.6); cursor: pointer; padding: 20px; user-select: none; }
 .lb-arrow:hover { color: #fff; }
 .lb-prev { left: 8px; }
