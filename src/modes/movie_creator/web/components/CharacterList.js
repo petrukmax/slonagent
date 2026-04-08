@@ -8,7 +8,7 @@ export function CharacterList() {
         canCreate=${true}
         renderItem=${char => {
             const primary = char.generations?.[char.primary_generation_id];
-            const thumb = primary?.file ? `/api/asset/100x100/${primary.file}` : null;
+            const thumb = primary?.file ? `/api/asset/100x100/${primary.poster || primary.file}` : null;
             return html`
                 ${thumb
                     ? html`<img class="thumb" src=${thumb} />`

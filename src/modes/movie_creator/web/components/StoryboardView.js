@@ -50,7 +50,7 @@ export function StoryboardView() {
 
 function ShotCard({ scene, shot, index }) {
     const primary = shot.generations?.[shot.primary_generation_id];
-    const thumb = primary?.file ? `/api/asset/400x400/${primary.file}` : null;
+    const thumb = primary?.file ? `/api/asset/400x400/${primary.poster || primary.file}` : null;
     const full = primary?.file ? `/api/asset/${primary.file}` : null;
     const description = shot.description || '(empty)';
 

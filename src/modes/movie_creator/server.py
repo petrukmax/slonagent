@@ -88,6 +88,8 @@ class MovieServer:
                 original = self.assets_dir / rel
                 if not original.exists():
                     return {"error": "Not found"}, 404
+                if original.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
+                    return FileResponse(original, headers=img_cache)
                 thumb = self.assets_dir / ".thumbs" / f"{width}x{height}" / rel
                 if not thumb.exists() or thumb.stat().st_mtime < original.stat().st_mtime:
                     self._make_thumbnail(original, thumb, width, height)
@@ -161,6 +163,7 @@ class MovieServer:
                     duration=msg.get("duration", 5),
                     aspect_ratio=msg.get("aspect_ratio", "16:9"),
                     resolution=msg.get("resolution", "720p"),
+                    fast=msg.get("fast", False),
                 ))
 
         elif t == "approval_response":

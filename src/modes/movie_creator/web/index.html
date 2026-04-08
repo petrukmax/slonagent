@@ -72,6 +72,10 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .gen-video-params { display: flex; gap: 12px; }
 .gen-video-params .form-field { flex: 1; }
 .gen-video-params input, .gen-video-params select { width: 100%; }
+.toggle { width: 40px; height: 22px; background: #555; border-radius: 11px; position: relative; cursor: pointer; transition: background .2s; }
+.toggle.on { background: var(--accent, #4a9eff); }
+.toggle-thumb { width: 18px; height: 18px; background: #fff; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: left .2s; }
+.toggle.on .toggle-thumb { left: 20px; }
 
 /* Lightbox */
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: flex; align-items: center; justify-content: center; z-index: 200; cursor: zoom-out; padding: 40px; }

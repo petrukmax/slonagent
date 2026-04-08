@@ -46,6 +46,18 @@ export function Text({ name, label, placeholder, type, min, max, step }) {
     `;
 }
 
+export function Toggle({ name, label }) {
+    const f = useField(name);
+    return html`
+        <div class="field">
+            <label>${label}</label>
+            <div class=${'toggle' + (f.value ? ' on' : '')} onClick=${() => f.set(!f.value)}>
+                <div class="toggle-thumb" />
+            </div>
+        </div>
+    `;
+}
+
 export function Textarea({ name, label, placeholder, grow }) {
     const f = useField(name);
     return html`

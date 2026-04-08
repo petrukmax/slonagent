@@ -11,33 +11,19 @@ import { html, useState } from '../lib.js';
 import { app } from '../app.js';
 import { Lightbox } from '../common/Lightbox.js';
 import { useEntity } from '../common/EntityView.js';
-import { Form, Select, Text, Textarea } from '../common/Form.js';
+import { Form, Select, Text, Textarea, Toggle } from '../common/Form.js';
 import { Dialog } from '../common/Dialog.js';
 import { ReferencePicker } from './ReferencePicker.js';
 
 const IMAGE_MODELS = [
     { id: 'gemini-image', label: 'Nano Banana 2' },
-    { id: 'seedream-v5', label: 'Seedream 5.0' },
-    { id: 'seedance-character', label: 'Seedance Character' },
+    { id: 'evolink-seedream5.0', label: 'Seedream 5.0 Lite' },
+    { id: 'muapi-seedance2.0-character', label: 'Seedance Character' },
 ];
 
 const VIDEO_MODELS = [
-    { id: 'seedance-omni-ref', label: 'Seedance Omni Ref' },
-    { id: 'seedance-omni-ref-fast', label: 'Seedance Omni Ref (fast)' },
-    { id: 'seedance-first-last', label: 'Seedance First-Last Frame' },
-    { id: 'seedance-first-last-fast', label: 'Seedance First-Last (fast)' },
-    { id: 'seedance-img2vid', label: 'Seedance Img\u2192Vid' },
-    { id: 'seedance-img2vid-fast', label: 'Seedance Img\u2192Vid (fast)' },
-    { id: 'seedance-txt2vid', label: 'Seedance Text\u2192Vid' },
-    { id: 'seedance-txt2vid-fast', label: 'Seedance Text\u2192Vid (fast)' },
-    { id: 'wan2.7-reference', label: 'Wan 2.7 Reference' },
-    { id: 'wan2.7-first-last', label: 'Wan 2.7 First-Last' },
-    { id: 'evolink-seedance-txt2vid', label: 'Evolink Seedance Text\u2192Vid' },
-    { id: 'evolink-seedance-txt2vid-fast', label: 'Evolink Seedance Text\u2192Vid (fast)' },
-    { id: 'evolink-seedance-img2vid', label: 'Evolink Seedance Img\u2192Vid' },
-    { id: 'evolink-seedance-img2vid-fast', label: 'Evolink Seedance Img\u2192Vid (fast)' },
-    { id: 'evolink-seedance-ref2vid', label: 'Evolink Seedance Reference' },
-    { id: 'evolink-seedance-ref2vid-fast', label: 'Evolink Seedance Reference (fast)' },
+    { id: 'evolink-seedance2.0-reference', label: 'Seedance Reference' },
+    { id: 'evolink-seedance2.0-first-last', label: 'Seedance First-Last' },
 ];
 
 const VIDEO_IDS = new Set(VIDEO_MODELS.map(m => m.id));
@@ -172,7 +158,7 @@ function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }
 function GenerateDialog({ title, initial, path, kind }) {
     const [draft, setDraft] = useState(initial);
     const isVideo = VIDEO_IDS.has(draft.model);
-    const isWan = draft.model.startsWith('wan');
+    const hasResolution = isVideo;
     const models = isVideo ? VIDEO_MODELS : IMAGE_MODELS;
 
     function generate() {
@@ -181,7 +167,8 @@ function GenerateDialog({ title, initial, path, kind }) {
         if (isVideo) {
             msg.duration = draft.duration || 5;
             msg.aspect_ratio = draft.aspect_ratio || '16:9';
-            if (isWan) msg.resolution = draft.resolution || '720p';
+            if (hasResolution) msg.resolution = draft.resolution || '720p';
+            msg.fast = !!draft.fast;
         }
         app.send(msg);
         Dialog.close();
@@ -208,12 +195,13 @@ function GenerateDialog({ title, initial, path, kind }) {
                                 { id: '9:16', label: '9:16' },
                                 { id: '1:1', label: '1:1' },
                             ]} />
-                            ${isWan && html`
+                            ${hasResolution && html`
                                 <${Select} name="resolution" label="Resolution" options=${[
+                                    { id: '480p', label: '480p' },
                                     { id: '720p', label: '720p' },
-                                    { id: '1080p', label: '1080p' },
                                 ]} />
                             `}
+                            <${Toggle} name="fast" label="Fast" />
                         </div>
                     `}
                     <${ReferencePicker} name="references" />

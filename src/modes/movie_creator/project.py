@@ -22,6 +22,7 @@ class Generation:
     file: str = ""
     poster: str = ""
     resolution: str = ""
+    fast: bool = False
     character_id: str = ""
     status: str = "generating"
     error: str = ""
