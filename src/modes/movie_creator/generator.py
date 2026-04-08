@@ -220,13 +220,18 @@ class Generator:
 
     # -- evolink.ai --
 
-    async def _evolink_poll(self, task_id: str) -> dict:
+    async def _evolink_poll(self, task_id: str, timeout_minutes: int = 10) -> dict:
         headers = {"Authorization": f"Bearer {self.evolink_key}"}
         poll_url = f"https://api.evolink.ai/v1/tasks/{task_id}"
+        deadline = asyncio.get_event_loop().time() + timeout_minutes * 60
         while True:
             await asyncio.sleep(5)
-            r = await asyncio.to_thread(requests.get, poll_url, headers=headers, timeout=30)
-            data = r.json()
+            try:
+                r = await asyncio.to_thread(requests.get, poll_url, headers=headers, timeout=60)
+                data = r.json()
+            except (requests.Timeout, requests.ConnectionError) as e:
+                log.warning("[movie] poll evolink %s network error, retrying: %s", task_id, e)
+                continue
             status = data.get("status", "")
             progress = data.get("progress", 0)
             log.info("[movie] poll evolink %s → %s (%d%%)", task_id, status, progress)
@@ -235,6 +240,8 @@ class Generator:
             elif status == "failed":
                 error = data.get("error", {})
                 raise RuntimeError(f"evolink failed: {error.get('message', data)}")
+            if asyncio.get_event_loop().time() > deadline:
+                raise RuntimeError(f"evolink poll timeout ({timeout_minutes}min)")
 
     async def _evolink_upload(self, path) -> str:
         """Upload image to evolink CDN via base64, return public URL. Resizes if >10MB or >6000px."""
@@ -274,73 +281,14 @@ class Generator:
         log.info("[movie] evolink upload %s → %s", path.name, url)
         return url
 
-    async def _evolink_image(self, model_id: str, prompt: str, refs: list = None) -> bytes:
-        """Evolink image generation (Seedream 5.0 Lite etc)."""
+    async def _evolink_generate(self, api_path: str, payload: dict, timeout: int = 120) -> bytes:
+        """POST to evolink API, poll for result, download first output."""
         if not self.evolink_key:
             raise RuntimeError("EVOLINK_API_KEY not set")
-        payload = {"model": model_id, "prompt": prompt, "size": "16:9", "quality": "2K"}
-        valid_refs = [r for r in (refs or []) if r.exists()]
-        if valid_refs:
-            image_urls = [await self._evolink_upload(ref) for ref in valid_refs[:14]]
-            payload["image_urls"] = image_urls
-        api_url = "https://api.evolink.ai/v1/images/generations"
+        api_url = f"https://api.evolink.ai/v1/{api_path}"
         log.info("[movie] POST %s payload=%s", api_url, {k: v for k, v in payload.items() if k != "image_urls"})
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.evolink_key}"}
         resp = await asyncio.to_thread(requests.post, api_url, json=payload, headers=headers, timeout=60)
-        if resp.status_code != 200:
-            raise RuntimeError(f"evolink {resp.status_code}: {resp.text[:300]}")
-        task_id = resp.json().get("id")
-        if not task_id:
-            raise RuntimeError(f"No task id: {resp.text[:300]}")
-        log.info("[movie] evolink image task_id=%s", task_id)
-        result = await self._evolink_poll(task_id)
-        results = result.get("results") or []
-        if not results:
-            raise RuntimeError("Completed but no results")
-        img_resp = await asyncio.to_thread(requests.get, results[0], timeout=120)
-        return img_resp.content
-
-    async def _evolink_video(self, mode: str, prompt: str, refs: list = None,
-                              duration: int = 5, aspect_ratio: str = "16:9",
-                              quality: str = "720p", fast: bool = False) -> bytes:
-        """Evolink Seedance 2.0 video generation."""
-        if not self.evolink_key:
-            raise RuntimeError("EVOLINK_API_KEY not set")
-        valid_refs = [r for r in (refs or []) if r.exists()]
-        # model_id выбирается по mode + наличию рефов
-        if not valid_refs:
-            base = "text-to-video"
-        elif mode == "first-last":
-            base = "image-to-video"
-        else:
-            base = "reference-to-video"
-        model_id = f"seedance-2.0-{'fast-' if fast else ''}{base}"
-        payload = {
-            "model": model_id,
-            "prompt": prompt,
-            "duration": duration,
-            "quality": quality,
-            "aspect_ratio": aspect_ratio,
-            "generate_audio": True,
-        }
-        if valid_refs:
-            max_refs = 2 if mode == "first-last" else 9
-            image_urls = []
-            for ref in valid_refs[:max_refs]:
-                image_urls.append(await self._evolink_upload(ref))
-            payload["image_urls"] = image_urls
-
-        api_url = "https://api.evolink.ai/v1/videos/generations"
-        log.info("[movie] POST %s model=%s payload=%s", api_url, model_id,
-                 {k: v for k, v in payload.items() if k != "image_urls"})
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.evolink_key}",
-        }
-        resp = await asyncio.to_thread(
-            requests.post, api_url,
-            json=payload, headers=headers, timeout=60,
-        )
         if resp.status_code != 200:
             raise RuntimeError(f"evolink {resp.status_code}: {resp.text[:300]}")
         task_id = resp.json().get("id")
@@ -351,6 +299,33 @@ class Generator:
         results = result.get("results") or []
         if not results:
             raise RuntimeError("Completed but no results")
-        vid_resp = await asyncio.to_thread(requests.get, results[0], timeout=300)
-        return vid_resp.content
+        dl = await asyncio.to_thread(requests.get, results[0], timeout=timeout)
+        return dl.content
+
+    async def _evolink_image(self, model_id: str, prompt: str, refs: list = None) -> bytes:
+        payload = {"model": model_id, "prompt": prompt, "size": "16:9", "quality": "2K"}
+        valid_refs = [r for r in (refs or []) if r.exists()]
+        if valid_refs:
+            payload["image_urls"] = [await self._evolink_upload(ref) for ref in valid_refs[:14]]
+        return await self._evolink_generate("images/generations", payload)
+
+    async def _evolink_video(self, mode: str, prompt: str, refs: list = None,
+                              duration: int = 5, aspect_ratio: str = "16:9",
+                              quality: str = "720p", fast: bool = False) -> bytes:
+        valid_refs = [r for r in (refs or []) if r.exists()]
+        if not valid_refs:
+            base = "text-to-video"
+        elif mode == "first-last":
+            base = "image-to-video"
+        else:
+            base = "reference-to-video"
+        model_id = f"seedance-2.0-{'fast-' if fast else ''}{base}"
+        payload = {
+            "model": model_id, "prompt": prompt, "duration": duration,
+            "quality": quality, "aspect_ratio": aspect_ratio, "generate_audio": True,
+        }
+        if valid_refs:
+            max_refs = 2 if mode == "first-last" else 9
+            payload["image_urls"] = [await self._evolink_upload(ref) for ref in valid_refs[:max_refs]]
+        return await self._evolink_generate("videos/generations", payload, timeout=300)
 

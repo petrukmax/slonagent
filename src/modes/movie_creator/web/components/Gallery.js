@@ -15,19 +15,6 @@ import { Form, Select, Text, Textarea, Toggle } from '../common/Form.js';
 import { Dialog } from '../common/Dialog.js';
 import { ReferencePicker } from './ReferencePicker.js';
 
-const IMAGE_MODELS = [
-    { id: 'gemini-image', label: 'Nano Banana 2' },
-    { id: 'evolink-seedream5.0', label: 'Seedream 5.0 Lite' },
-    { id: 'muapi-seedance2.0-character', label: 'Seedance Character' },
-];
-
-const VIDEO_MODELS = [
-    { id: 'evolink-seedance2.0-reference', label: 'Seedance Reference' },
-    { id: 'evolink-seedance2.0-first-last', label: 'Seedance First-Last' },
-];
-
-const VIDEO_IDS = new Set(VIDEO_MODELS.map(m => m.id));
-
 let lastModel = 'gemini-image';
 
 async function uploadFile(file, path, kind) {
@@ -155,21 +142,41 @@ function Tile({ gen, isPrimary, canSetPrimary, onSetPrimary, onRemix, onDelete }
     `;
 }
 
+function SeedanceForm() {
+    return html`
+        <${Text} name="duration" label="Duration (sec)" type="number" min=${4} max=${15} />
+        <${Select} name="aspect_ratio" label="Aspect ratio" options=${[
+            { id: '16:9', label: '16:9' }, { id: '9:16', label: '9:16' }, { id: '1:1', label: '1:1' },
+            { id: '4:3', label: '4:3' }, { id: '3:4', label: '3:4' }, { id: '21:9', label: '21:9' },
+            { id: 'adaptive', label: 'Adaptive' },
+        ]} />
+        <${Select} name="resolution" label="Resolution" options=${[
+            { id: '480p', label: '480p' }, { id: '720p', label: '720p' },
+        ]} />
+        <${Toggle} name="fast" label="Fast" />
+    `;
+}
+
+const IMAGE_MODELS = [
+    { id: 'gemini-image', label: 'Nano Banana 2' },
+    { id: 'evolink-seedream5.0', label: 'Seedream 5.0 Lite' },
+    { id: 'muapi-seedance2.0-character', label: 'Seedance Character' },
+];
+
+const VIDEO_MODELS = [
+    { id: 'evolink-seedance2.0-reference', label: 'Seedance Reference', form: SeedanceForm },
+    { id: 'evolink-seedance2.0-first-last', label: 'Seedance First-Last', form: SeedanceForm },
+];
+
 function GenerateDialog({ title, initial, path, kind }) {
     const [draft, setDraft] = useState(initial);
-    const isVideo = VIDEO_IDS.has(draft.model);
-    const hasResolution = isVideo;
+    const isVideo = VIDEO_MODELS.some(m => m.id === draft.model);
     const models = isVideo ? VIDEO_MODELS : IMAGE_MODELS;
+    const currentModel = models.find(m => m.id === draft.model);
 
     function generate() {
         lastModel = draft.model;
-        const msg = { type: 'generate', path, kind, prompt: draft.prompt, model: draft.model, references: draft.references || [] };
-        if (isVideo) {
-            msg.duration = draft.duration || 5;
-            msg.aspect_ratio = draft.aspect_ratio || '16:9';
-            if (hasResolution) msg.resolution = draft.resolution || '720p';
-            msg.fast = !!draft.fast;
-        }
+        const msg = { type: 'generate', path, kind, ...draft, references: draft.references || [] };
         app.send(msg);
         Dialog.close();
     }
@@ -187,22 +194,8 @@ function GenerateDialog({ title, initial, path, kind }) {
                     </div>
                     <${Select} name="model" label="Model" options=${models} />
                     <${Textarea} name="prompt" label="Prompt" placeholder="Describe the image or video..." grow />
-                    ${isVideo && html`
-                        <div class="gen-video-params">
-                            <${Text} name="duration" label="Duration (sec)" type="number" min=${5} max=${15} />
-                            <${Select} name="aspect_ratio" label="Aspect ratio" options=${[
-                                { id: '16:9', label: '16:9' },
-                                { id: '9:16', label: '9:16' },
-                                { id: '1:1', label: '1:1' },
-                            ]} />
-                            ${hasResolution && html`
-                                <${Select} name="resolution" label="Resolution" options=${[
-                                    { id: '480p', label: '480p' },
-                                    { id: '720p', label: '720p' },
-                                ]} />
-                            `}
-                            <${Toggle} name="fast" label="Fast" />
-                        </div>
+                    ${currentModel?.form && html`
+                        <div class="gen-extra-params"><${currentModel.form} /></div>
                     `}
                     <${ReferencePicker} name="references" />
                 <//>
