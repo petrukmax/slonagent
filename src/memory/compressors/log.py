@@ -787,13 +787,14 @@ class LogCompressor(Skill):
             log.warning("[LogCompressor] Reflector returned empty")
             return ""
 
-        orig_tokens = Memory.count_tokens([{"role": "user", "content": observations}])
         refl_tokens = Memory.count_tokens([{"role": "user", "content": reflected}])
+        orig_tokens = Memory.count_tokens([{"role": "user", "content": observations}])
+        log.info("[LogCompressor] Reflector level %d: %d → %d tokens (%.0f%%)",
+                 compression_level, orig_tokens, refl_tokens, (1 - refl_tokens / max(orig_tokens, 1)) * 100)
 
-        if refl_tokens >= orig_tokens and compression_level < 4:
-            log.warning("[LogCompressor] Reflection didn't compress (level %d → %d)", compression_level, compression_level + 1)
-            return await self._run_reflector(observations, compression_level + 1)
+        if refl_tokens <= self._reflect_after_tokens or compression_level >= 4:
+            return reflected
 
-        log.info("[LogCompressor] Reflector: %d → %d tokens (%.0f%%)",
-                 orig_tokens, refl_tokens, (1 - refl_tokens / max(orig_tokens, 1)) * 100)
-        return reflected
+        log.warning("[LogCompressor] Still above %d tokens, escalating level %d → %d",
+                     self._reflect_after_tokens, compression_level, compression_level + 1)
+        return await self._run_reflector(reflected, compression_level + 1)
