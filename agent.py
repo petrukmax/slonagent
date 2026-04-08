@@ -405,6 +405,8 @@ class Agent:
                         else:
                             content = delta.content.removeprefix("</thought>")
                             if content:
+                                if thinking_text and not text:
+                                    await self.transport.send_thinking(thinking_text, thinking_id, final=True)
                                 text += content
                                 await self.transport.send_message(text, stream_id, final=False)
                     # OpenAI o1: reasoning_content, OpenRouter: reasoning
@@ -418,7 +420,7 @@ class Agent:
                     if unexpected:
                         logging.warning("[stream] unknown delta fields: %s", unexpected)
 
-                if thinking_text:
+                if thinking_text and not text:
                     await self.transport.send_thinking(thinking_text, thinking_id, final=True)
                 if text and stream_id:
                     await self.transport.send_message(text, stream_id, final=True)
