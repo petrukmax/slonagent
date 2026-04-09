@@ -29,8 +29,7 @@ from src.transport.telegram import TelegramTransport
 from src.transport.multi import MultiTransport
 from src.transport.dashboard import DashboardTransport
 
-
-
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 async def main():
     if len(sys.argv) < 2:

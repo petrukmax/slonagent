@@ -30,8 +30,10 @@ async def main():
     allowed = config["telegram"]["allowed_user_ids"]
     chat_id = allowed[0]
 
-    transport = TelegramTransport(bot=bot, chat_id=chat_id, thread_id=None, agent_id="diary", verbose=False)
+    TelegramTransport.bot = bot
+    transport = TelegramTransport(chat_id=chat_id, thread_id=None, verbose=False)
     agent = Agent.from_config(config["agent"],
+        id="diary",
         agent_dir=tempfile.mkdtemp(),
         transport=transport,
     )

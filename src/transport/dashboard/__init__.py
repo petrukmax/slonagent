@@ -75,7 +75,7 @@ class DashboardTransport(WebTransport):
 
         if DashboardTransport._log_handler is None:
             handler = _LogHandler()
-            handler.setFormatter(logging.Formatter("%(asctime)s [%(agent_id)s] %(name)s - %(levelname)s - %(message)s"))
+            handler.setFormatter(logging.Formatter("%(asctime)s %(name)s - %(levelname)s - %(message)s"))
             logging.getLogger().addHandler(handler)
             DashboardTransport._log_handler = handler
 
