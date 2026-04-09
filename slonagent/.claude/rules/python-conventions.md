@@ -1,0 +1,56 @@
+---
+description: Python-конвенции проекта
+---
+
+# Python-конвенции проекта
+
+## Структура пакетов
+
+По умолчанию `__init__.py` **не создаём** — используем namespace packages (Python 3.3+).
+
+**Исключение:** если папка представляет пакет с одним главным публичным классом, создаём `__init__.py` и помещаем главный класс **прямо в него** — чтобы сохранить единообразный синтаксис импорта:
+
+```python
+# GOOD — папка fact/ с __init__.py, класс определён внутри него
+from src.memory.providers.fact import FactProvider
+
+# BAD — класс в отдельном файле, реэкспорт через __init__
+from src.memory.providers.fact.provider import FactProvider
+```
+
+Вспомогательные модули пакета (`retain.py`, `recall.py`, `storage.py` и т.д.) по-прежнему живут рядом в папке.
+
+## Именование файлов и классов
+
+Файл называется по смыслу модуля в `snake_case`, класс внутри — в `PascalCase`:
+
+| Файл | Класс |
+|---|----|
+| `src/memory/base.py` | `BaseProvider` |
+| `src/memory/file.py` | `FileProvider` |
+| `src/memory/simplemem.py` | `SimpleMemProvider` |
+
+## Импорты
+
+Используем абсолютные импорты от корня проекта (где лежит `main.py`):
+
+```python
+# GOOD
+from src.memory.base import BaseProvider
+from memory import Memory
+
+# BAD
+from .base import BaseProvider
+```
+
+## Приватные методы и публичное использование
+
+Если метод начинается с `_`, но используется из другого класса/модуля — убираем `_`:
+
+```python
+# BAD — приватный метод, но зовём снаружи
+Memory._count_tokens(turns)
+
+# GOOD — убрали _ раз метод публичный
+Memory.count_tokens(turns)
+```

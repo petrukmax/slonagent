@@ -1,0 +1,16 @@
+{
+  "attribution": {
+    "commit": ""
+  },
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Bash(git *)",
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(mkdir *)",
+      "Bash(ls *)"
+    ]
+  }
+}

@@ -1,0 +1,389 @@
+"""fact/ — FactProvider: локальный аналог HindsightProvider.
+
+Вместо API-вызовов к серверу — напрямую вызывает локальные модули:
+  retain   → src.memory.providers.fact.retain   (факты + консолидация в конце)
+  recall   → src.memory.providers.fact.recall   (семантический поиск)
+  reflect  → src.memory.providers.fact.reflect  (агентный цикл для fact_reflect)
+  storage  → src.memory.providers.fact.storage  (SQLite + LanceDB)
+
+Логика — 1 в 1 с HindsightProvider:
+  _consolidate()       накопленные ходы → retain() (факты + консолидация)
+  get_context_prompt() recall() по тексту пользователя → в системный промпт
+  fact_recall          явный семантический поиск (≡ hindsight_recall)
+  fact_get_document    получить полный текст документа (≡ hindsight_get_document)
+  fact_reflect         агентный цикл: search_observations → recall → LLM (≡ hindsight_reflect)
+"""
+import asyncio
+import logging
+import os
+from datetime import datetime
+from typing import Annotated
+
+from agent import tool, bypass, Agent
+from src.memory.memory import Memory
+from src.memory.providers.base import BaseProvider
+from src.memory.providers.fact.retain import RetainItem, retain
+from src.memory.providers.fact.recall import recall_async
+from src.memory.providers.fact.storage import Storage
+
+log = logging.getLogger(__name__)
+
+
+class FactProvider(BaseProvider):
+    """
+    Провайдер памяти на базе локального Hindsight-совместимого движка.
+
+    Хранит факты в SQLite + LanceDB (без внешнего сервера).
+    Встраивание — SentenceTransformer (Qwen3-Embedding-0.6B).
+    LLM — OpenAI-совместимый клиент (AsyncOpenAI).
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        api_key: str,
+        base_url: str,
+        consolidate_tokens: int = 3_000,
+        recall_max_tokens: int = 12_000,
+        auto_recall: bool = False,
+        auto_consolidate: bool = True,
+        retain_mission: str = "",
+        custom_instructions: str = "",
+        embedding_model: str = "",
+        rerank_model: str = "",
+    ):
+        """
+        Args:
+            model_name:           Имя LLM-модели для извлечения фактов и reflect.
+            api_key:              API-ключ.
+            consolidate_tokens:   Порог токенов накопленных ходов для запуска retain.
+            recall_max_tokens:    Мягкий лимит токенов в auto-recall (get_context_prompt).
+            auto_recall:          Автоматически подмешивать recall в системный промпт.
+            auto_consolidate:     Запускать create_observations после retain.
+            retain_mission:       Кастомная миссия для LLM при извлечении фактов.
+            custom_instructions:  Замена дефолтных guidelines извлечения (если задано).
+            embedding_model:      HuggingFace-имя embedding-модели (по умолчанию Qwen3-Embedding-0.6B).
+                                  При смене модели нужно пересоздать БД.
+            rerank_model:         FlashRank модель для cross-encoder реранкинга.
+        """
+        super().__init__(consolidate_tokens=consolidate_tokens)
+        self._model_name          = model_name
+        self._recall_max_tokens   = recall_max_tokens
+        self._auto_recall         = auto_recall
+        self._auto_consolidate    = auto_consolidate
+        self._retain_mission      = retain_mission
+        self._custom_instructions = custom_instructions
+        self._rerank_model        = rerank_model
+
+        self._llm = Agent.OpenAI(api_key, base_url)
+
+        self._embedding_model = embedding_model
+        self.storage: Storage | None = None
+        self._current_recall_ids: dict[str, str] = {}  # short_id → full fact_id
+
+    async def start(self):
+        await super().start()
+        sqlite_path  = os.path.join(self.agent.memory.memory_dir, "fact", "facts.db")
+        lancedb_path = os.path.join(self.agent.memory.memory_dir, "fact", "lancedb")
+        self.storage = Storage(sqlite_path, lancedb_path, self._embedding_model)
+        log.info("[FactProvider] Storage initialized")
+
+    def get_tools(self) -> list:
+        tools = super().get_tools()
+        if not self._auto_recall:
+            tools = [t for t in tools if t["function"]["name"] != "fact_context_used"]
+        return tools
+
+    # ── Consolidate (retain pipeline) ────────────────────────────────────────────
+
+    async def _consolidate(self, pending: list) -> None:
+        """
+        Конвертирует накопленные ходы в RetainItem и запускает retain pipeline.
+        Диалоговые реплики конкатенируются в один item чтобы чанкер мог
+        разбить их с учётом контекста соседних сообщений.
+        """
+        conv_lines: list[str] = []
+        conv_ts: datetime | None = None
+        items: list[RetainItem] = []
+
+        for turn in pending:
+            if not isinstance(turn, dict):
+                continue
+            role = turn.get("role", "")
+            if role not in ("user", "assistant"):
+                continue
+            label  = "Пользователь" if role == "user" else "Ассистент"
+            ts_raw = turn.get("_timestamp")
+            ts     = (
+                datetime.fromisoformat(ts_raw)
+                if isinstance(ts_raw, str) else (ts_raw or datetime.utcnow())
+            )
+            content = turn.get("content", "")
+            blocks = content if isinstance(content, list) else (
+                [{"type": "text", "text": content}] if isinstance(content, str) and content else []
+            )
+            for block in blocks:
+                if not isinstance(block, dict) or block.get("type") != "text":
+                    continue
+                text = block.get("text", "")
+                if not text.strip():
+                    continue
+                doc_id = block.get("_document_id")
+                if doc_id:
+                    items.append(RetainItem(
+                        content=text,
+                        context="attached document",
+                        event_date=None,
+                        document_id=doc_id,
+                        retain_mission=self._retain_mission,
+                        custom_instructions=self._custom_instructions,
+                    ))
+                    items.append(RetainItem(
+                        content=f"{label} загрузил документ {doc_id}",
+                        context="document upload event",
+                        event_date=ts,
+                        retain_mission=self._retain_mission,
+                        custom_instructions=self._custom_instructions,
+                    ))
+                else:
+                    if conv_ts is None:
+                        conv_ts = ts
+                    ts_prefix = ts.strftime("%Y-%m-%d %H:%M")
+                    conv_lines.append(f"[{ts_prefix}] {label}: {text}")
+
+        if conv_lines:
+            items.insert(0, RetainItem(
+                content="\n".join(conv_lines),
+                context="conversation",
+                event_date=conv_ts,
+                retain_mission=self._retain_mission,
+                custom_instructions=self._custom_instructions,
+            ))
+
+        if not items:
+            return
+        retain(items, self._llm, self._model_name, self.storage,
+               with_observations=self._auto_consolidate)
+
+    async def get_context_prompt(self, user_text: str = "") -> str:
+        """Автоматический recall по тексту пользователя → системный промпт."""
+        if not self._auto_recall or not user_text:
+            return (
+                "Если для ответа нужны конкретные факты — о пользователе, его жизни, "
+                "предпочтениях, людях, событиях, проектах, документах или любых других "
+                "темах из прошлых разговоров — сделай fact_recall перед ответом. "
+                "Не угадывай то, что можно найти в памяти."
+            )
+        try:
+            q_vec = await asyncio.to_thread(self.storage.encode_query, user_text[:1500])
+            resp = await recall_async(
+                user_text[:1500], q_vec, self.storage,
+                types=None,
+                max_tokens=self._recall_max_tokens,
+                budget="mid",
+                rerank_model=self._rerank_model,
+            )
+            self._current_recall_ids = {r.fact_id.split("-")[0]: r.fact_id for r in resp.results}
+
+            def _fmt(r) -> str:
+                return f"- [{r.fact_id.split('-')[0]}] {r.fact}"
+
+            obs_lines, conv_lines = [], []
+            doc_by_id: dict[str, list[str]] = {}
+            for r in resp.results:
+                if r.fact_type == "observation":
+                    obs_lines.append(_fmt(r))
+                elif r.is_real_document and r.document_id:
+                    doc_by_id.setdefault(r.document_id, []).append(f"  {_fmt(r)}")
+                else:
+                    conv_lines.append(_fmt(r))
+
+            parts = []
+            if conv_lines:
+                parts.append("Из разговоров:\n" + "\n".join(conv_lines))
+            if obs_lines:
+                parts.append("Синтезированные наблюдения:\n" + "\n".join(obs_lines))
+            for doc_id, lines in doc_by_id.items():
+                parts.append(f"Из документа [id={doc_id}]:\n" + "\n".join(lines))
+
+            if not parts:
+                self._current_recall_ids = {}
+                return ""
+
+            body = "\n\n".join(parts)
+            return (
+                f'<fact_memories query="$LAST_USER_MESSAGE">\n{body}\n</fact_memories>\n\n'
+                "Эти факты доступны только в текущем ходу. "
+                "Если ты использовал какие-то из них при формировании ответа — "
+                "вызови fact_context_used с их id ([xxxxxxxx]) сразу после ответа. "
+                "Передавай только id из блока выше, только для этого ответа. "
+                "Не вызывай если факты не пригодились."
+            )
+        except Exception as e:
+            log.warning("[FactProvider] auto-recall failed: %s", e, exc_info=True)
+            return ""
+
+    # ── Tools ────────────────────────────────────────────────────────────────────
+
+    @tool(
+        "Быстрый семантический поиск по долгосрочной памяти. "
+        "Используй для конкретных фактов: кто, что, когда, где. "
+        "Запрос — утверждение или развёрнутый вопрос, не ключевые слова: "
+        "вместо 'Анна работа' пиши 'где работает Анна и кем'. "
+        "Возвращает три независимых результата: факты из разговоров, синтезированные наблюдения "
+        "и факты из загруженных документов (с document_id — используй его в get_document чтобы прочитать исходный текст). "
+        "Для сложных вопросов (анализ, сравнение, выводы из нескольких фактов) используй fact_reflect."
+    )
+    async def recall(
+        self,
+        query: Annotated[str, "Поисковый запрос — утверждение или вопрос, не набор ключевых слов"],
+        max_tokens: Annotated[int, "Мягкий лимит токенов в ответе (по умолчанию 10000)"] = 10_000,
+        budget: Annotated[str, "Глубина поиска: low — один конкретный факт; mid — стандартный вопрос; high — нужно много фактов (история персонажа, сравнение, анализ). По умолчанию mid"] = "mid",
+        # include_chunks: bool = False,  # включить исходный чанк под каждым фактом
+    ) -> dict:
+        try:
+            q_vec = await asyncio.to_thread(self.storage.encode_query, query[:1500])
+            obs_resp, doc_resp, conv_resp = await asyncio.gather(
+                recall_async(
+                    query[:1500], q_vec, self.storage,
+                    types=["observation"],
+                    max_tokens=max_tokens // 3,
+                    budget=budget,
+                    rerank_model=self._rerank_model,
+                    include_chunks=False,
+                ),
+                recall_async(
+                    query[:1500], q_vec, self.storage,
+                    types=["world", "experience"],
+                    is_real_document=True,
+                    max_tokens=max_tokens // 3,
+                    budget=budget,
+                    rerank_model=self._rerank_model,
+                    include_chunks=False,
+                ),
+                recall_async(
+                    query[:1500], q_vec, self.storage,
+                    types=["world", "experience"],
+                    is_real_document=False,
+                    max_tokens=max_tokens // 3,
+                    budget=budget,
+                    rerank_model=self._rerank_model,
+                    include_chunks=False,
+                ),
+            )
+            seen_chunks: set[str] = set()  # нужен когда include_chunks включён
+
+            def _fmt(r) -> str:
+                line = f"- {r.fact}"
+                if r.chunk_text and r.chunk_id and r.chunk_id not in seen_chunks:
+                     seen_chunks.add(r.chunk_id)
+                     line += f"\n  [chunk: {r.chunk_text}]"
+                return line
+
+            doc_by_id: dict[str, list[str]] = {}
+            for r in doc_resp.results:
+                doc_by_id.setdefault(r.document_id, []).append(f"  {_fmt(r)}")
+
+            parts = []
+            if conv_resp.results:
+                parts.append("Из разговоров:\n" + "\n".join(_fmt(r) for r in conv_resp.results))
+            if obs_resp.results:
+                parts.append("Синтезированные наблюдения:\n" + "\n".join(_fmt(r) for r in obs_resp.results))
+            for doc_id, lines in doc_by_id.items():
+                parts.append(f"Из документа [id={doc_id}] (факты документа, не реальные события):\n" + "\n".join(lines))
+
+            if not parts:
+                return {"memories": "Ничего не найдено."}
+
+            body = "\n\n".join(parts)
+            return {"memories": f'<fact_memories query="$TOOL_QUERY">\n{body}\n</fact_memories>'}
+        except Exception as e:
+            log.warning("[FactProvider] recall tool failed: %s", e, exc_info=True)
+            return {"error": str(e)}
+
+    @tool("Получить текст документа из памяти по его document_id. Поддерживает пагинацию по чанкам.")
+    async def get_document(
+        self,
+        document_id: Annotated[str, "ID документа (из результатов fact_recall)"],
+        offset: Annotated[int, "С какого чанка начинать (0-based). По умолчанию 0."] = 0,
+        limit: Annotated[int, "Сколько чанков вернуть. По умолчанию 5. Передай -1 чтобы получить документ целиком — только если уверен что он нужен полностью."] = 5,
+    ) -> dict:
+        try:
+            total_row = await asyncio.to_thread(
+                self.storage.conn.execute,
+                "SELECT COUNT(*) AS cnt FROM chunks WHERE document_id = ?",
+                (document_id,),
+            )
+            total = total_row.fetchone()
+            if not total or total["cnt"] == 0:
+                return {"error": f"Документ {document_id!r} не найден в памяти."}
+            total_chunks = total["cnt"]
+
+            rows = await asyncio.to_thread(
+                self.storage.conn.execute,
+                "SELECT chunk_index, chunk_text FROM chunks WHERE document_id = ? ORDER BY chunk_index LIMIT ? OFFSET ?",
+                (document_id, limit, offset),
+            )
+            chunks = rows.fetchall()
+
+            has_more = (offset + len(chunks)) < total_chunks
+            return {
+                "document_id": document_id,
+                "text": "\n".join(c["chunk_text"] for c in chunks),
+                "chunks_returned": len(chunks),
+                "offset": offset,
+                "total_chunks": total_chunks,
+                **({"has_more": True, "next_offset": offset + len(chunks)} if has_more else {"has_more": False}),
+            }
+        except Exception as e:
+            log.warning("[FactProvider] get_document failed: %s", e, exc_info=True)
+            return {"error": str(e)}
+
+    @bypass("create_observations", "Синтезировать наблюдения из накопленных фактов", standalone=False)
+    async def create_observations(self, args: str = "") -> str:
+        from src.memory.providers.fact.retain import create_observations as _create_obs, _observations_lock
+        if _observations_lock.locked():
+            return "Синтез наблюдений уже запущен."
+        asyncio.create_task(_create_obs(self.storage, self._llm, self._model_name))
+        return "Запущен синтез наблюдений в фоне."
+
+    @tool(
+        "Глубокий анализ памяти с рассуждением через агентный цикл поиска. "
+        "Используй когда нужно: сравнить факты, сделать вывод из нескольких событий, "
+        "ответить на 'почему', 'как изменилось', 'что общего'. "
+        "Медленнее fact_recall — не используй для простых фактических вопросов."
+    )
+    async def reflect(
+        self,
+        query: Annotated[str, "Вопрос для глубокого анализа"],
+    ) -> dict:
+        try:
+            from src.memory.providers.fact.reflect import run_reflect_agent
+            return await run_reflect_agent(
+                query=query[:1500],
+                storage=self.storage,
+                llm_client=self._llm,
+                model_name=self._model_name,
+                rerank_model=self._rerank_model,
+            )
+        except Exception as e:
+            log.warning("[FactProvider] reflect failed: %s", e, exc_info=True)
+            return {"error": str(e)}
+
+    @tool("Зафиксировать в истории, какие факты из автоматического контекста повлияли на ответ.")
+    async def context_used(
+        self,
+        ids: Annotated[list[str], "Список коротких id фактов (формат [xxxxxxxx] из блока <fact_memories>), которые повлияли на ответ"],
+    ) -> dict:
+        full_ids = [self._current_recall_ids[i] for i in ids if i in self._current_recall_ids]
+        self._current_recall_ids = {}
+        if not full_ids:
+            return {"error": "переданные id не совпадают с фактами текущего хода"}
+        placeholders = ", ".join("?" for _ in full_ids)
+        rows = await asyncio.to_thread(
+            lambda: self.storage.conn.execute(
+                f"SELECT fact FROM facts WHERE fact_id IN ({placeholders})",
+                full_ids,
+            ).fetchall()
+        )
+        return {"used_facts": [r["fact"] for r in rows]}

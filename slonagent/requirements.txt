@@ -1,0 +1,35 @@
+aiogram>=3.4.0
+openai>=1.0.0
+aiohttp-socks>=0.8.4
+psutil>=5.9.0
+requests
+Pillow
+fastapi
+uvicorn
+wsproto
+websockets
+soundfile
+asyncssh
+markdownify
+dacite
+tiktoken
+dateparser
+
+# SemanticProvider / FactProvider
+lancedb
+sentence-transformers
+numpy
+pyarrow
+langchain-text-splitters
+flashrank
+
+# SimpleMemProvider (устаревший, используй SemanticProvider)
+# simplemem>=0.1.0
+
+# HindsightProvider (устаревший, используй FactProvider)
+# vendor/uvloop-stub
+# vendor/fcntl-stub
+# vendor/resource-stub
+# hindsight-all
+
+

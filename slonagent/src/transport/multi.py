@@ -1,0 +1,55 @@
+"""Transport that fans out events to multiple transports."""
+from src.transport.base import BaseTransport
+
+
+class MultiTransport(BaseTransport):
+    """Broadcasts all events to a list of child transports."""
+
+    def __init__(self, transports: list[BaseTransport]):
+        super().__init__()
+        self.transports = transports
+
+    def set_agent(self, agent):
+        super().set_agent(agent)
+        for t in self.transports:
+            t.set_agent(agent)
+            t.on_message = lambda parts, uid=None, trigger_answer=True, src=t: self._child_message(src, parts, uid, trigger_answer)
+
+    async def _child_message(self, source, content_parts, user_message_id=None, trigger_answer=True):
+        text = "\n".join(p.get("text", "") for p in content_parts if p.get("type") == "text")
+        if text:
+            for t in self.transports:
+                if t is not source:
+                    await t.inject_message(text)
+        await self.agent.process_message(content_parts, user_message_id, trigger_answer=trigger_answer)
+
+    async def send_message(self, text, stream_id=None, final=True):
+        for t in self.transports:
+            await t.send_message(text, stream_id, final=final)
+
+    async def send_thinking(self, text, stream_id=None, final=False):
+        for t in self.transports:
+            await t.send_thinking(text, stream_id, final=final)
+
+    async def send_system_prompt(self, text):
+        for t in self.transports:
+            await t.send_system_prompt(text)
+
+    async def on_tool_call(self, name, args):
+        for t in self.transports:
+            await t.on_tool_call(name, args)
+
+    async def on_tool_result(self, name, result):
+        for t in self.transports:
+            await t.on_tool_result(name, result)
+
+    async def send_processing(self, active):
+        for t in self.transports:
+            await t.send_processing(active)
+
+    def get_skills(self):
+        return [s for t in self.transports for s in t.get_skills()]
+
+    async def inject_message(self, text):
+        for t in self.transports:
+            await t.inject_message(text)
