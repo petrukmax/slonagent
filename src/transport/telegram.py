@@ -321,10 +321,10 @@ class TelegramTransport(BaseTransport):
                     if future: future.set_result(result)
                 except Exception as e2:
                     if future: future.set_exception(e2)
-                    else: log.warning("queue item failed after retry: %s", e2)
+                    else: log.warning("queue item failed after retry: %s", e2, exc_info=True)
             except Exception as e:
                 if future: future.set_exception(e)
-                else: log.warning("queue item failed: %s", e)
+                else: log.warning("queue item failed: %s", e, exc_info=True)
             last_action = asyncio.get_event_loop().time()            
 
     def _ensure_queue(self):
