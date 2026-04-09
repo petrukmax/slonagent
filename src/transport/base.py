@@ -12,8 +12,8 @@ class BaseTransport:
         self.agent = agent
         self.on_message = agent.process_message
 
-    def get_skill(self):
-        return None
+    def get_skills(self):
+        return []
 
     async def send_message(self, text: str, stream_id=None, final: bool = True):
         pass

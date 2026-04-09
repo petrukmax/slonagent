@@ -17,7 +17,13 @@
         "allowed_user_ids": [123456789],
         "transport": { "verbose": false }
     },
-    "dashboard": { "port": 8765 },
+    "web": {
+        "port": 8765,
+        "sish_domain": "",
+        "sish_port": 2222,
+        "sish_key": "",
+        "password_hash": ""
+    },
     "fork_agent": {
         "model_name": "gemini-3-flash-preview",
         "api_key": "$keys.llm",

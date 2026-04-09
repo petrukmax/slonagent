@@ -1,13 +1,10 @@
 import warnings
 
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.client.session.aiohttp import AiohttpSession
-
 from agent import Agent
 from src.transport.cli import CliTransport
 from src.transport.telegram import TelegramTransport
-from src.ui.dashboard import Dashboard
+from src.transport.multi import MultiTransport
+from src.transport.dashboard import DashboardTransport
 
 # Перехват warnings — единственный способ перекрыть то, что другие модули
 # (в т.ч. зависимости) меняют формат логов и включают предупреждения внутри себя.
@@ -65,7 +62,7 @@ _LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 async def run_cli():
     logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
     transport = CliTransport()
-    agent = Agent.from_config(resolve(config["agent"]), agent_dir=os.getcwd(), transport=transport)
+    agent = Agent.from_config(resolve(config["agent"]), id="main", agent_dir=os.getcwd(), transport=transport)
     await agent.start()
 
     print("CLI режим. Введите сообщение (Ctrl+C для выхода).")
@@ -76,22 +73,10 @@ async def run_cli():
             print()
 
 async def run_telegram():
-    dashboard = Dashboard(port=config.get("dashboard", {}).get("port", 8765))
-    await dashboard.start()
-    WrappedTG = dashboard.wrap(TelegramTransport)
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
 
-    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-    bot = Bot(token=config["telegram"]["bot_token"], session=AiohttpSession(proxy=proxy) if proxy else None)
-    dp = Dispatcher()
-
-    allowed_user_ids = config["telegram"]["allowed_user_ids"]
-    agents: dict[str, Agent] = {}
-
-    async def make_agent(chat_id: int, thread_id: int, force_create: bool, copy_memory_from=None):
-        is_main_agent = (chat_id == allowed_user_ids[0] and thread_id is None)
-        agent_id = "main" if is_main_agent else f"{chat_id}_{thread_id}"
-        if agent_id in agents: return agents[agent_id]
-
+    async def make_agent(agent_id, transport, force_create: bool, copy_memory_from=None):
+        is_main_agent = (agent_id == "main")
         agent_dir = os.getcwd() if is_main_agent else os.path.join(os.getcwd(), "forks", agent_id)
         if not force_create and not os.path.exists(agent_dir): return None
 
@@ -111,80 +96,17 @@ async def run_telegram():
             with open(config_path, encoding="utf-8") as f:
                 agent_cfg = json.load(f)["agent"]
 
-        transport = WrappedTG(**config["telegram"]["transport"], bot=bot, chat_id=chat_id, thread_id=thread_id, agent_id=agent_id)
-        agent = Agent.from_config(resolve(agent_cfg), agent_dir=agent_dir, transport=transport)
+        transport = MultiTransport([transport, DashboardTransport(**config.get("web", {}))])
+        agent = Agent.from_config(resolve(agent_cfg), id=agent_id, agent_dir=agent_dir, transport=transport)
         if copy_memory_from:
-            agent.memory.copy_from(copy_memory_from.memory)
+            agent.memory.copy_from(copy_memory_from.agent.memory)
         await agent.start()
-        agents[agent_id] = agent
         return agent
 
-    main_agent = await make_agent(allowed_user_ids[0], None, force_create=True)
-    _allowed_groups: dict[int, bool] = {}
-
-    async def _is_group_allowed(chat_id: int) -> bool:
-        if chat_id in _allowed_groups:
-            return _allowed_groups[chat_id]
-        admins = await bot.get_chat_administrators(chat_id)
-        admin_ids = {a.user.id for a in admins}
-        allowed = bool(admin_ids & set(allowed_user_ids))
-        _allowed_groups[chat_id] = allowed
-        return allowed
-
-    async def on_message(message: Message):
-        if not message.from_user: return
-        if message.chat.id < 0: #group
-            if not await _is_group_allowed(message.chat.id): return
-        else:
-            if message.from_user.id not in allowed_user_ids: return
-
-        thread_id = message.message_thread_id if message.chat.is_forum else None
-        agent = await make_agent(message.chat.id, thread_id, force_create=False)
-        if not agent:
-            if message.text:
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🗒 Чистый агент", callback_data="new_agent_clean"),
-                    InlineKeyboardButton(text="🧠 Клон с памятью", callback_data="new_agent_clone"),
-                ]])
-                await message.answer(
-                    "В этом топике ещё нет агента.\n\n"
-                    "• <b>🗒 Чистый агент</b> — начнёт с нуля, без памяти\n"
-                    "• <b>🧠 Клон с памятью</b> — скопирует личность и инструменты из основного агента",
-                    reply_markup=kb,
-                    parse_mode="HTML",
-                )
-            return
-
-        await agent.transport.handle_message(message)
-
-    async def on_callback_query(callback: CallbackQuery):
-        if not callback.from_user or callback.from_user.id not in allowed_user_ids: return
-
-        chat_id = callback.message.chat.id
-        thread_id = callback.message.message_thread_id if callback.message.chat.is_forum else None
-
-        await callback.answer()
-        await callback.message.edit_reply_markup(reply_markup=None)
-
-        if callback.data.startswith("answer:"):
-            text = callback.data[len("answer:"):]
-            agent = await make_agent(chat_id, thread_id, force_create=False)
-            if agent:
-                await callback.message.answer(text)
-                await agent.transport.process_message(content_parts=[{"type": "text", "text": text}])
-            return
-
-        if callback.data in ("new_agent_clean", "new_agent_clone"):
-            status = await callback.message.answer("⏳ Создаю агента...")
-            copy_from = main_agent if callback.data == "new_agent_clone" else None
-            await make_agent(chat_id, thread_id, force_create=True, copy_memory_from=copy_from)
-
-            label = "✅ Клон создан" if callback.data == "new_agent_clone" else "✅ Агент создан"
-            await status.edit_text(label)
-
-    dp.message()(on_message)
-    dp.callback_query()(on_callback_query)
-    await dp.start_polling(bot)
+    await TelegramTransport.listen(
+        config=config["telegram"],
+        make_agent=make_agent,
+    )
 
 acquire_pid_lock()
 try:

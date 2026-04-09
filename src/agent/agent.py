@@ -57,17 +57,19 @@ class Agent:
         agent._config = cfg
         return agent
 
-    def add_transport_skill(self):
-        skill = self.transport.get_skill() if self.transport else None
-        if skill and skill not in self.skills:
-            skill.register(self)
-            self.skills.insert(0, skill)
+    def add_transport_skills(self):
+        if not self.transport:
+            return
+        for skill in self.transport.get_skills():
+            if skill not in self.skills:
+                skill.register(self)
+                self.skills.insert(0, skill)
 
     async def spawn_subagent(self, name: str, **cfg_overrides) -> "Agent":
         subagent_dir = os.path.join(self.agent_dir, "memory", "subagents", name)
         os.makedirs(subagent_dir, exist_ok=True)
         cfg_overrides.setdefault("transport", self.transport)
-        agent = Agent.from_config(self._config, agent_dir=subagent_dir, **cfg_overrides)
+        agent = Agent.from_config(self._config, id=f"{self.id}:{name}", agent_dir=subagent_dir, **cfg_overrides)
         await agent.start(run_loop=False)
 
         # Propagate subagent's stop → parent's tool_stop.
@@ -84,7 +86,8 @@ class Agent:
 
         return agent
 
-    def __init__(self, model_name: str, api_key: str, base_url: str, agent_dir: str, memory_compressor = None, memory_providers: list | dict = None, skills: list = None, max_iterations: int = 20, transcription_model_name: str = "gemini-2.5-flash", transcription_api_key: str = None, transcription_base_url: str = None, transport=None):
+    def __init__(self, id: str, model_name: str, api_key: str, base_url: str, agent_dir: str, memory_compressor = None, memory_providers: list | dict = None, skills: list = None, max_iterations: int = 20, transcription_model_name: str = "gemini-2.5-flash", transcription_api_key: str = None, transcription_base_url: str = None, transport=None):
+        self.id = id
         self.model_name = model_name
         self.api_key = api_key
         self.transcription_model_name = transcription_model_name
@@ -430,7 +433,7 @@ class Agent:
 
 
     async def loop(self):
-        self.add_transport_skill()
+        self.add_transport_skills()
         while True:
             content_parts, user_message_id, trigger_answer = await self.next_message()
             self._stop_event.clear()

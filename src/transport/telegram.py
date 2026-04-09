@@ -3,9 +3,10 @@ import base64, io, os, re, asyncio, logging, json, mimetypes
 
 log = logging.getLogger(__name__)
 from typing import Annotated
-from aiogram import Bot
+from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramRetryAfter, TelegramServerError
-from aiogram.types import Message, FSInputFile, InputMediaPhoto, InputMediaDocument, LinkPreviewOptions, MessageOriginUser, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, BotCommandScopeChat
+from aiogram.types import Message, CallbackQuery, FSInputFile, InputMediaPhoto, InputMediaDocument, LinkPreviewOptions, MessageOriginUser, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, BotCommandScopeChat
 from agent import Skill, tool
 from src.transport.base import BaseTransport
 
@@ -207,14 +208,14 @@ class TelegramSkill(Skill):
 
 
 class TelegramTransport(BaseTransport):
-    def __init__(self, bot: Bot, chat_id: int, thread_id: int | None = None, verbose: bool = True, agent_id: str = ""):
+    bot: Bot = None
+
+    def __init__(self, chat_id: int, thread_id: int | None = None, verbose: bool = True):
         super().__init__()
-        self.bot = bot
         self.chat_id = chat_id
         self.thread_id = thread_id
         self.thread_name: str | None = None
         self.agent = None
-        self.agent_id = agent_id
         self._no_link_preview = LinkPreviewOptions(is_disabled=True)
         self._skill = TelegramSkill(self)
         self.verbose = verbose
@@ -251,8 +252,8 @@ class TelegramTransport(BaseTransport):
                 self._typing_task.cancel()
                 self._typing_task = None
 
-    def get_skill(self):
-        return self._skill
+    def get_skills(self):
+        return [self._skill]
 
     def set_agent(self, agent):
         super().set_agent(agent)
@@ -270,7 +271,7 @@ class TelegramTransport(BaseTransport):
                 await self.bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=self.chat_id))
             except Exception as e:
                 log.warning("[telegram] set_my_commands failed: %s", e)
-            log.info("[telegram] set %d commands for %s", len(commands), self.agent_id or self.chat_id)
+            log.info("[telegram] set %d commands for %s", len(commands), self.chat_id)
         asyncio.create_task(update_commands())
 
     async def _exec_item(self, item):
@@ -569,4 +570,93 @@ class TelegramTransport(BaseTransport):
             user_message_id=first.message_id,
             trigger_answer=trigger_answer,
         )
+
+    @classmethod
+    async def listen(cls, config: dict, make_agent):
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+        cls.bot = Bot(token=config["bot_token"], session=AiohttpSession(proxy=proxy) if proxy else None)
+        dp = Dispatcher()
+
+        allowed_user_ids = config["allowed_user_ids"]
+        transport_kwargs = config.get("transport", {})
+
+        transports: dict[str, "TelegramTransport"] = {}
+        async def get_transport(chat_id, thread_id, force_create=False, copy_memory_from=None):
+            is_main = (chat_id == allowed_user_ids[0] and thread_id is None)
+            agent_id = "main" if is_main else f"{chat_id}_{thread_id}"
+            if agent_id in transports:
+                return transports[agent_id]
+            tg = cls(chat_id=chat_id, thread_id=thread_id, **transport_kwargs)
+            agent = await make_agent(agent_id, tg, force_create=force_create, copy_memory_from=copy_memory_from)
+            if agent:
+                transports[agent_id] = tg
+                return tg
+            return None
+
+
+        allowed_groups: dict[int, bool] = {}
+        async def is_group_allowed(chat_id: int) -> bool:
+            if chat_id in allowed_groups:
+                return allowed_groups[chat_id]
+            admins = await cls.bot.get_chat_administrators(chat_id)
+            admin_ids = {a.user.id for a in admins}
+            allowed = bool(admin_ids & set(allowed_user_ids))
+            allowed_groups[chat_id] = allowed
+            return allowed
+
+        async def on_message(message: Message):
+            if not message.from_user: return
+            if message.chat.id < 0:
+                if not await is_group_allowed(message.chat.id): return
+            else:
+                if message.from_user.id not in allowed_user_ids: return
+
+            thread_id = message.message_thread_id if message.chat.is_forum else None
+            tg = await get_transport(message.chat.id, thread_id)
+            if not tg:
+                if message.text:
+                    kb = InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="🗒 Чистый агент", callback_data="new_agent_clean"),
+                        InlineKeyboardButton(text="🧠 Клон с памятью", callback_data="new_agent_clone"),
+                    ]])
+                    await message.answer(
+                        "В этом топике ещё нет агента.\n\n"
+                        "• <b>🗒 Чистый агент</b> — начнёт с нуля, без памяти\n"
+                        "• <b>🧠 Клон с памятью</b> — скопирует личность и инструменты из основного агента",
+                        reply_markup=kb,
+                        parse_mode="HTML",
+                    )
+                return
+
+            await tg.handle_message(message)
+
+        async def on_callback_query(callback: CallbackQuery):
+            if not callback.from_user or callback.from_user.id not in allowed_user_ids: return
+
+            chat_id = callback.message.chat.id
+            thread_id = callback.message.message_thread_id if callback.message.chat.is_forum else None
+
+            await callback.answer()
+            await callback.message.edit_reply_markup(reply_markup=None)
+
+            if callback.data.startswith("answer:"):
+                text = callback.data[len("answer:"):]
+                tg = await get_transport(chat_id, thread_id)
+                if tg:
+                    await callback.message.answer(text)
+                    await tg.process_message(content_parts=[{"type": "text", "text": text}])
+                return
+
+            if callback.data in ("new_agent_clean", "new_agent_clone"):
+                status = await callback.message.answer("⏳ Создаю агента...")
+                copy_from = main_transport if callback.data == "new_agent_clone" else None
+                await get_transport(chat_id, thread_id, force_create=True, copy_memory_from=copy_from)
+                label = "✅ Клон создан" if callback.data == "new_agent_clone" else "✅ Агент создан"
+                await status.edit_text(label)
+
+        dp.message()(on_message)
+        dp.callback_query()(on_callback_query)
+
+        main_transport = await get_transport(allowed_user_ids[0], None, force_create=True)
+        await dp.start_polling(cls.bot)
 

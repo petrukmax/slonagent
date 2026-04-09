@@ -47,6 +47,9 @@ class MultiTransport(BaseTransport):
         for t in self.transports:
             await t.send_processing(active)
 
+    def get_skills(self):
+        return [s for t in self.transports for s in t.get_skills()]
+
     async def inject_message(self, text):
         for t in self.transports:
             await t.inject_message(text)

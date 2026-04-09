@@ -146,7 +146,7 @@ btn.addEventListener('click', sendMsg);
 
 
 function connect() {
-  ws = new WebSocket('ws://' + location.host + location.pathname + 'ws');
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + location.pathname + 'ws');
   ws.onopen = () => { st.textContent = 'connected'; st.className = 'status ok'; btn.disabled = false; };
   ws.onclose = () => { st.textContent = 'disconnected — retry in 2s'; st.className = 'status'; btn.disabled = true; setTimeout(connect, 2000); };
   ws.onerror = () => ws.close();
