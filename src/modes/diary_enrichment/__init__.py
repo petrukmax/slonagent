@@ -150,7 +150,7 @@ class EnrichmentSkill(Skill):
         await transport.send_message(proposal)
 
         while True:
-            content_parts, _ = await self.agent.next_message()
+            content_parts, _, _ = await self.agent.next_message()
             answer = " ".join(p.get("text", "") for p in content_parts if isinstance(p, dict)).strip()
 
             if is_approval(answer):
@@ -178,7 +178,7 @@ class EnrichmentSkill(Skill):
         proposal = format_glossary_add_proposal(id, description)
         await self.agent.transport.send_message(proposal)
 
-        content_parts, _ = await self.agent.next_message()
+        content_parts, _, _ = await self.agent.next_message()
         answer = " ".join(p.get("text", "") for p in content_parts if isinstance(p, dict)).strip()
 
         if is_approval(answer):
@@ -200,7 +200,7 @@ class EnrichmentSkill(Skill):
         proposal = format_glossary_update_proposal(id, old_desc, new_description)
         await self.agent.transport.send_message(proposal)
 
-        content_parts, _ = await self.agent.next_message()
+        content_parts, _, _ = await self.agent.next_message()
         answer = " ".join(p.get("text", "") for p in content_parts if isinstance(p, dict)).strip()
 
         if is_approval(answer):
@@ -218,7 +218,7 @@ class EnrichmentSkill(Skill):
         q_text = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
         await self.agent.transport.send_message(f"❓ **Вопросы по неделе {date_from}:**\n\n{q_text}")
 
-        content_parts, _ = await self.agent.next_message()
+        content_parts, _, _ = await self.agent.next_message()
         answer = " ".join(p.get("text", "") for p in content_parts if isinstance(p, dict)).strip()
 
         result, soul_note = split_reply(answer)

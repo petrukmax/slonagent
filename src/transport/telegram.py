@@ -391,11 +391,17 @@ class TelegramTransport(BaseTransport):
         else:
             result_text = html.escape(result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=2))
         result_text = result_text[:2000]
-        self._edit(
-            self._tool_msg,
-            f"<blockquote expandable>{self._tool_call_text}</blockquote>\n<blockquote expandable>{result_text}</blockquote>",
-            parse_mode="HTML",
-        )
+        if self._tool_msg:
+            self._edit(
+                self._tool_msg,
+                f"<blockquote expandable>{self._tool_call_text}</blockquote>\n<blockquote expandable>{result_text}</blockquote>",
+                parse_mode="HTML",
+            )
+        else:
+            await self._send(
+                f"<blockquote expandable><b>[{html.escape(name)}]</b>\n{result_text}</blockquote>",
+                parse_mode="HTML",
+            )
 
     async def send_message(self, text: str, stream_id=None, final: bool = True):
         messages = self._stream_messages.setdefault(stream_id, []) if stream_id else None
