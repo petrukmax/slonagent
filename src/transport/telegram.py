@@ -475,8 +475,9 @@ class TelegramTransport(BaseTransport):
                 forward_sender = None
 
             text = message.text or message.caption
-            if text and text.startswith("/"):
-                text = text.split("@")[0] + (text[text.index(" "):] if " " in text else "")
+            if text and text.startswith("/") and "@" in text.split()[0]:
+                cmd = text.split()[0]
+                text = cmd.split("@")[0] + text[len(cmd):]
             if text:
                 if forward_sender:
                     content_parts.append({"type": "text", "text": f"<forwarded_message from=\"{forward_sender}\">\n{text}\n</forwarded_message>"})
