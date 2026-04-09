@@ -1,18 +1,16 @@
 import asyncio, json, logging
 from collections import deque
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import PlainTextResponse
 from contextvars import ContextVar
 from agent import Skill, bypass
 from src.transport.web import WebTransport
 
 log = logging.getLogger(__name__)
 
-_HTML = (Path(__file__).parent / "web" / "index.html").read_text(encoding="utf-8")
-_BUFFER_SIZE = 500
+_WEB_DIR = Path(__file__).parent / "web"
 
 agent_context: ContextVar[str] = ContextVar("agent_id", default="main")
 
@@ -36,7 +34,9 @@ class _LogHandler(logging.Handler):
             category = self._category(record.name)
             record.agent_id = agent_id
             text = self.format(record)
-            transport._emit({"type": "log", "category": category, "level": record.levelname, "text": text})
+            event = {"type": "log", "category": category, "level": record.levelname, "text": text}
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(asyncio.ensure_future, transport.send(event))
         except Exception:
             self.handleError(record)
 
@@ -62,8 +62,7 @@ class DashboardTransport(WebTransport):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._clients: set[WebSocket] = set()
-        self._buffer: deque = deque(maxlen=_BUFFER_SIZE)
-        self._queue: asyncio.Queue | None = None
+        self._buffer: deque = deque(maxlen=500)
         self._skill = DashboardSkill(self)
 
     def get_skills(self):
@@ -71,7 +70,7 @@ class DashboardTransport(WebTransport):
 
     def set_agent(self, agent):
         super().set_agent(agent)
-        self.register_route("get", "/", self._page)
+        self.register_route("get", "/{filename:path}", self._static)
         self.register_websocket("/ws", self._ws)
 
         if DashboardTransport._log_handler is None:
@@ -83,86 +82,77 @@ class DashboardTransport(WebTransport):
         _LogHandler._instances[agent.id] = self
         agent_context.set(agent.id)
 
-    async def _page(self):
-        return HTMLResponse(_HTML.replace("__AGENT_ID__", self.agent.id))
+    _NO_CACHE = {"Cache-Control": "no-store"}
+    _MIME = {"js": "application/javascript", "css": "text/css", "html": "text/html"}
 
-    async def _ws(self, websocket: WebSocket):
-        await websocket.accept()
-        if self._queue is None:
-            self._queue = asyncio.Queue(maxsize=2000)
-            asyncio.create_task(self._broadcaster())
+    async def _static(self, filename: str = "index.html"):
+        path = _WEB_DIR / (filename or "index.html")
+        if not path.is_file() or not path.resolve().is_relative_to(_WEB_DIR.resolve()):
+            return PlainTextResponse("Not found", status_code=404)
+        mime = self._MIME.get(path.suffix.lstrip("."), "text/plain")
+        return PlainTextResponse(path.read_text(encoding="utf-8"), media_type=mime, headers=self._NO_CACHE)
+
+    async def _ws(self, ws: WebSocket):
+        await ws.accept()
         for event in self._buffer:
-            await websocket.send_text(json.dumps(event, ensure_ascii=False))
-        self._clients.add(websocket)
+            await ws.send_text(json.dumps(event, ensure_ascii=False))
+        self._clients.add(ws)
         try:
             while True:
-                data = await websocket.receive_text()
+                data = await ws.receive_text()
                 try:
                     msg = json.loads(data)
-                    if msg.get("type") == "user_message" and msg.get("text", "").strip():
-                        text = msg["text"].strip()
-                        self._emit({"type": "chat", "role": "user", "text": text})
-                        await self.process_message(content_parts=[{"type": "text", "text": text}])
-                except Exception:
-                    pass
+                except json.JSONDecodeError:
+                    log.warning("ws: invalid JSON: %s", data[:200])
+                    continue
+                if msg.get("type") == "transport" and msg.get("method") == "process_message":
+                    await self.process_message(
+                        content_parts=msg.get("content_parts", []),
+                        user_message_id=msg.get("user_message_id"),
+                        trigger_answer=msg.get("trigger_answer", True),
+                    )
+                else:
+                    log.warning("ws: unknown message: %s", msg)
         except WebSocketDisconnect:
             pass
         finally:
-            self._clients.discard(websocket)
+            self._clients.discard(ws)
 
-
-    def _emit(self, event: dict):
-        event["ts"] = datetime.now().strftime("%H:%M:%S")
+    async def send(self, event: dict):
         self._buffer.append(event)
-        if self._queue:
+        if not self._clients:
+            return
+        data = json.dumps(event, ensure_ascii=False)
+        dead = set()
+        for ws in list(self._clients):
             try:
-                self._queue.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
-
-    async def _broadcaster(self):
-        while True:
-            event = await self._queue.get()
-            if not self._clients:
-                continue
-            data = json.dumps(event, ensure_ascii=False)
-            dead = set()
-            for client in list(self._clients):
-                try:
-                    await client.send_text(data)
-                except Exception:
-                    dead.add(client)
-            self._clients -= dead
+                await ws.send_text(data)
+            except Exception:
+                dead.add(ws)
+        self._clients -= dead
 
     # --- BaseTransport interface ---
 
+    async def _transport_event(self, method: str, **kwargs):
+        await self.send({"type": "transport", "method": method, **kwargs})
+
     async def send_message(self, text: str, stream_id=None, final: bool = True):
-        self._emit({"type": "chat", "role": "assistant", "text": text, "chat_id": stream_id})
+        await self._transport_event("send_message", text=text, stream_id=stream_id, final=final)
 
     async def send_thinking(self, text: str, stream_id=None, final: bool = False):
-        self._emit({"type": "collapsible", "title": "[think]", "text": text, "collapsible_id": stream_id})
+        await self._transport_event("send_thinking", text=text, stream_id=stream_id, final=final)
 
     async def send_system_prompt(self, text: str):
-        label = text.split("\n")[0].strip("[] ")[:40]
-        self._emit({"type": "collapsible", "title": f"[sys] {label}", "text": text})
+        await self._transport_event("send_system_prompt", text=text)
 
     async def on_tool_call(self, name: str, args: dict):
-        lines = "\n".join(f"  {k}: {v}" for k, v in args.items())
-        text = f"[{name}]\n{lines}" if lines else f"[{name}]"
-        self._emit({"type": "collapsible", "title": f"[>] {name}", "text": text})
+        await self._transport_event("on_tool_call", name=name, args={k: str(v) for k, v in args.items()})
 
     async def on_tool_result(self, name: str, result):
-        if isinstance(result, dict):
-            parts = [
-                f"<binary {len(v)} bytes>" if isinstance(v, (bytes, bytearray)) else f"[{k}]\n{v}"
-                for k, v in result.items() if v not in (None, "", [], {})
-            ]
-            text = "\n".join(parts) if parts else "(пусто)"
-        elif isinstance(result, (bytes, bytearray)):
-            text = f"<binary {len(result)} bytes>"
-        else:
-            text = str(result)
-        self._emit({"type": "collapsible", "title": f"[<] {name}", "text": text})
+        await self._transport_event("on_tool_result", name=name, result=result)
+
+    async def send_processing(self, active: bool):
+        await self._transport_event("send_processing", active=active)
 
     async def inject_message(self, text: str):
-        self._emit({"type": "chat", "role": "user", "text": f"[→] {text}"})
+        await self._transport_event("inject_message", text=text)
