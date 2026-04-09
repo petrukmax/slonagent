@@ -120,12 +120,26 @@ async def run_telegram():
         return agent
 
     main_agent = await make_agent(allowed_user_ids[0], None, force_create=True)
+    _allowed_groups: dict[int, bool] = {}
+
+    async def _is_group_allowed(chat_id: int) -> bool:
+        if chat_id in _allowed_groups:
+            return _allowed_groups[chat_id]
+        admins = await bot.get_chat_administrators(chat_id)
+        admin_ids = {a.user.id for a in admins}
+        allowed = bool(admin_ids & set(allowed_user_ids))
+        _allowed_groups[chat_id] = allowed
+        return allowed
 
     async def on_message(message: Message):
-        if not message.from_user or message.from_user.id not in allowed_user_ids:
-            return
+        if not message.from_user: return
+        if message.chat.id < 0: #group
+            if not await _is_group_allowed(message.chat.id): return
+        else:
+            if message.from_user.id not in allowed_user_ids: return
 
-        agent = await make_agent(message.chat.id, message.message_thread_id, force_create=False)
+        thread_id = message.message_thread_id if message.chat.is_forum else None
+        agent = await make_agent(message.chat.id, thread_id, force_create=False)
         if not agent:
             if message.text:
                 kb = InlineKeyboardMarkup(inline_keyboard=[[
@@ -147,7 +161,7 @@ async def run_telegram():
         if not callback.from_user or callback.from_user.id not in allowed_user_ids: return
 
         chat_id = callback.message.chat.id
-        thread_id = callback.message.message_thread_id
+        thread_id = callback.message.message_thread_id if callback.message.chat.is_forum else None
 
         await callback.answer()
         await callback.message.edit_reply_markup(reply_markup=None)

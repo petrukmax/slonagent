@@ -446,6 +446,12 @@ class TelegramTransport(BaseTransport):
         content_parts = []
 
         user_id = first.from_user.id if first.from_user else None
+        if self.chat_id < 0 and first.from_user:
+            count = await self.bot.get_chat_member_count(self.chat_id)
+            if count > 2:  # more than just one user + bot
+                u = first.from_user
+                sender_name = " ".join(filter(None, [u.first_name, u.last_name])) or u.username or str(u.id)
+                content_parts.append({"type": "text", "text": f"[from: {sender_name}]"})
 
         for message in messages:
             origin = message.forward_origin
@@ -542,8 +548,18 @@ class TelegramTransport(BaseTransport):
         if not content_parts:
             return
 
+        trigger_answer = True
+        if self.chat_id < 0:
+            bot_id = (await self.bot.me()).id
+            bot_username = (await self.bot.me()).username
+            reply = first.reply_to_message
+            replied_to_bot = reply and reply.from_user and reply.from_user.id == bot_id
+            mentioned = f"@{bot_username}" in (first.text or first.caption or "")
+            trigger_answer = replied_to_bot or mentioned
+
         await self.process_message(
             content_parts=content_parts,
             user_message_id=first.message_id,
+            trigger_answer=trigger_answer,
         )
 

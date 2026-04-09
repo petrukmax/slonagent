@@ -30,9 +30,9 @@ class BaseTransport:
     async def on_tool_result(self, name: str, result):
         pass
 
-    async def process_message(self, content_parts: list, user_message_id=None):
+    async def process_message(self, content_parts: list, user_message_id=None, trigger_answer: bool = True):
         if self.on_message:
-            await self.on_message(content_parts, user_message_id)
+            await self.on_message(content_parts, user_message_id, trigger_answer=trigger_answer)
         else:
             log.warning("process_message called but on_message not set")
 

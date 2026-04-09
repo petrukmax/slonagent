@@ -455,21 +455,22 @@ class Agent:
                 logging.warning("[agent] LLM %s error, retry %d/%d in %ds: %s", self.model_name, attempt + 1, max_retries, wait, e)
                 await asyncio.sleep(wait)
 
-    async def next_message(self) -> tuple[list, any]:
-        content_parts, user_message_id = await self._message_queue.get()
+    async def next_message(self) -> tuple[list, any, bool]:
+        content_parts, user_message_id, trigger_answer = await self._message_queue.get()
         batch = []
         while not self._message_queue.empty():
             batch.append(self._message_queue.get_nowait())
         if batch:
             logging.info("[agent] merging %d queued messages", len(batch))
-            all_items = [(content_parts, user_message_id)] + batch
-            content_parts = [p for i, (parts, _) in enumerate(all_items) for p in ([{"type": "text", "text": "\n"}] if i > 0 else []) + list(parts)]
-            user_message_id = next((mid for _, mid in all_items if mid is not None), None)
+            all_items = [(content_parts, user_message_id, trigger_answer)] + batch
+            content_parts = [p for i, (parts, _, _) in enumerate(all_items) for p in ([{"type": "text", "text": "\n"}] if i > 0 else []) + list(parts)]
+            user_message_id = next((mid for _, mid, _ in all_items if mid is not None), None)
+            trigger_answer = any(t for _, _, t in all_items)
         self._current_content_parts = content_parts
         self._system_instruction = None
         user_query = " ".join(p.get("text", "") for p in content_parts if isinstance(p, dict) and "text" in p).strip()
         logging.info("[agent] incoming: %r", user_query)
-        return content_parts, user_message_id
+        return content_parts, user_message_id, trigger_answer
 
     async def start(self, run_loop=True):
         for skill in self.skills:
@@ -521,7 +522,7 @@ class Agent:
                 logging.warning("[agent] describe_video retry %d/%d in %ds: %s", attempt + 1, max_retries, wait, e)
                 await asyncio.sleep(wait)
 
-    async def process_message(self, content_parts: list, user_message_id=None):
+    async def process_message(self, content_parts: list, user_message_id=None, trigger_answer: bool = True):
         user_query = " ".join(p.get("text", "") for p in content_parts if isinstance(p, dict) and "text" in p).strip()
         for skill in self.skills:
             if skill.is_bypass_command(user_query):
@@ -529,7 +530,7 @@ class Agent:
                 if result:
                     await self.transport.send_message(result)
                 return
-        await self._message_queue.put((content_parts, user_message_id))
+        await self._message_queue.put((content_parts, user_message_id, trigger_answer))
 
     async def dispatch_tool_calls(self, tool_calls: list) -> list[dict]:
         tool_to_skill = {decl["function"]["name"]: skill for skill in self.skills for decl in skill.get_tools()}
@@ -574,13 +575,15 @@ class Agent:
     async def loop(self):
         self.add_transport_skill()
         while True:
-            content_parts, user_message_id = await self.next_message()
+            content_parts, user_message_id, trigger_answer = await self.next_message()
             self._stop_event.clear()
-            await self.transport.send_processing(True)
 
             async def run_message():
                 try:
                     await self.memory.add_turn({"role": "user", "content": content_parts, "_user_message_id": user_message_id})
+                    if not trigger_answer: return
+                    
+                    await self.transport.send_processing(True)
                     tool_calls, text = await self.llm()
                     iteration = 0
                     while tool_calls and iteration < self.max_iterations:

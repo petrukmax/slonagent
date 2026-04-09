@@ -13,14 +13,14 @@ def UITransportWrapper(transport_class, dashboard: Dashboard):
             super().__init__(*args, **kwargs)
             dashboard.register_transport(agent_id, self)
 
-        async def process_message(self, content_parts: list, user_message_id=None):
+        async def process_message(self, content_parts: list, user_message_id=None, trigger_answer: bool = True):
             texts = [
                 p["text"] for p in content_parts
                 if isinstance(p, dict) and p.get("type") == "text" and not p["text"].startswith("<")
             ]
             if texts:
                 self.dashboard.add_chat("user", " ".join(texts), agent_id=self.agent_id)
-            return await super().process_message(content_parts, user_message_id)
+            return await super().process_message(content_parts, user_message_id, trigger_answer=trigger_answer)
 
         async def send_message(self, text: str, stream_id=None, final: bool = True):
             await super().send_message(text, stream_id, final=final)
